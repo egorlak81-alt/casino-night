@@ -206,6 +206,15 @@ def main():
         log.error("DATABASE_URL not set!")
         return
 
+    # Сбрасываем вебхук и старые сессии перед стартом
+    import asyncio
+    import telegram
+    async def reset_bot():
+        bot = telegram.Bot(token=BOT_TOKEN)
+        await bot.delete_webhook(drop_pending_updates=True)
+        log.info("Webhook cleared")
+    asyncio.run(reset_bot())
+
     init_db()
 
     threading.Thread(target=run_flask, daemon=True).start()
