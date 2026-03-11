@@ -16,10 +16,14 @@ BOT_TOKEN = ""; DATABASE_URL = ""; ADMIN_ID = 0; GAME_URL = ""
 # ── DB ──
 def get_conn():
     u = urlparse(DATABASE_URL)
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
     return pg8000.native.Connection(
         host=u.hostname, port=u.port or 5432,
         database=u.path.lstrip("/"), user=u.username,
-        password=u.password, ssl_context=True
+        password=u.password, ssl_context=ctx
     )
 
 def qone(sql, **kw):
