@@ -1,9 +1,8 @@
-import os, logging, threading, time, ssl
+import os, logging, threading, time, asyncio
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 import psycopg2
-import psycopg2.extras
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
@@ -12,37 +11,32 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-BOT_TOKEN = ""; DATABASE_URL = ""; ADMIN_ID = 0; GAME_URL = ""
+BOT_TOKEN    = os.environ.get("BOT_TOKEN",    "").strip()
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+ADMIN_ID     = int(os.environ.get("ADMIN_ID", "0").strip() or "0")
+GAME_URL     = os.environ.get("GAME_URL",     "").strip()
 
+# ── DB ──
 def get_conn():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
 def qone(sql, params=()):
     c = get_conn()
     try:
-        cur = c.cursor()
-        cur.execute(sql, params)
-        return cur.fetchone()
-    finally:
-        c.close()
+        cur = c.cursor(); cur.execute(sql, params); return cur.fetchone()
+    finally: c.close()
 
 def qall(sql, params=()):
     c = get_conn()
     try:
-        cur = c.cursor()
-        cur.execute(sql, params)
-        return cur.fetchall()
-    finally:
-        c.close()
+        cur = c.cursor(); cur.execute(sql, params); return cur.fetchall()
+    finally: c.close()
 
 def qexec(sql, params=()):
     c = get_conn()
     try:
-        cur = c.cursor()
-        cur.execute(sql, params)
-        c.commit()
-    finally:
-        c.close()
+        cur = c.cursor(); cur.execute(sql, params); c.commit()
+    finally: c.close()
 
 def init_db():
     qexec("""CREATE TABLE IF NOT EXISTS players (
@@ -59,64 +53,60 @@ def ensure_player(tg_id, username, first_name):
           (tg_id, username, first_name))
 
 def get_balance(tg_id):
-    r = qone("SELECT balance FROM players WHERE tg_id=%s", (tg_id,))
-    return r[0] if r else 0
+    r = qone("SELECT balance FROM players WHERE tg_id=%s", (tg_id,)); return r[0] if r else 0
 
 def add_balance(tg_id, delta):
     qexec("""UPDATE players SET balance=balance+%s,
         total_won=total_won+(CASE WHEN %s>0 THEN %s ELSE 0 END),
-        total_lost=total_lost+(CASE WHEN %s<0 THEN %s*-1 ELSE 0 END),
+        total_lost=total_lost+(CASE WHEN %s<0 THEN ABS(%s) ELSE 0 END),
         games_played=games_played+1 WHERE tg_id=%s""",
-        (delta, delta, delta, delta, delta, tg_id))
+        (delta,delta,delta,delta,delta,tg_id))
     return get_balance(tg_id)
 
 def get_last_daily(tg_id):
-    r = qone("SELECT last_daily FROM players WHERE tg_id=%s", (tg_id,))
-    return r[0] if r else None
+    r = qone("SELECT last_daily FROM players WHERE tg_id=%s",(tg_id,)); return r[0] if r else None
 
 def set_last_daily(tg_id):
-    qexec("UPDATE players SET last_daily=NOW() WHERE tg_id=%s", (tg_id,))
+    qexec("UPDATE players SET last_daily=NOW() WHERE tg_id=%s",(tg_id,))
 
 def get_top():
     return qall("SELECT first_name,balance,games_played FROM players ORDER BY balance DESC LIMIT 10")
 
-# ── ROOMS (in-memory) ──
+# ── ROOMS ──
 ROOMS_LOCK = threading.Lock()
 COUNTDOWN_SECS = 90
-MAX_PLAYERS = {'poker': 6, 'durak': 4}
+MAX_PLAYERS = {'poker':6,'durak':4}
 
-def _make_room(game, name):
+def _room(game, name):
     return {'game':game,'name':name,'players':[],'host_id':None,
             'messages':[],'actions':[],'msg_seq':0,'act_seq':0,
             'countdown_start':None,'started':False}
 
 ROOMS = {}
-for i in range(1, 6):
-    ROOMS[f'poker_{i}'] = _make_room('poker', f'Покер · Стол {i}')
-    ROOMS[f'durak_{i}'] = _make_room('durak', f'Дурак · Стол {i}')
+for i in range(1,6):
+    ROOMS[f'poker_{i}'] = _room('poker', f'Покер · Стол {i}')
+    ROOMS[f'durak_{i}'] = _room('durak', f'Дурак · Стол {i}')
 
-def _get_countdown(r):
+def _cd(r):
     if not r['countdown_start']: return None
     if r['started']: return 0
     return max(0, COUNTDOWN_SECS - int(time.time() - r['countdown_start']))
 
-def _push_msg(r, msg):
+def _push(r, msg):
     r['msg_seq'] += 1
     r['messages'].append({'seq':r['msg_seq'],'data':msg})
-    if len(r['messages']) > 200: r['messages'] = r['messages'][-200:]
+    if len(r['messages'])>200: r['messages']=r['messages'][-200:]
 
 def _cleanup(r):
     now = time.time()
-    old = len(r['players'])
-    r['players'] = [p for p in r['players'] if now - p['last_ping'] < 35]
-    if len(r['players']) != old:
-        if not r['players']:
-            r.update({'host_id':None,'messages':[],'actions':[],'msg_seq':0,
-                      'act_seq':0,'countdown_start':None,'started':False})
-        else:
-            if r['host_id'] not in [p['id'] for p in r['players']]:
-                r['host_id'] = r['players'][0]['id']
-            if len(r['players']) < 2: r['countdown_start'] = None
+    r['players'] = [p for p in r['players'] if now-p['last_ping']<35]
+    if not r['players']:
+        r.update({'host_id':None,'messages':[],'actions':[],'msg_seq':0,
+                  'act_seq':0,'countdown_start':None,'started':False})
+    else:
+        if r['host_id'] not in [p['id'] for p in r['players']]:
+            r['host_id'] = r['players'][0]['id']
+        if len(r['players'])<2: r['countdown_start']=None
 
 # ── FLASK ──
 app = Flask(__name__)
@@ -129,44 +119,42 @@ def health(): return "ok"
 def api_rooms():
     game = request.args.get("game","")
     with ROOMS_LOCK:
-        result = []
-        for rid, r in ROOMS.items():
+        out = []
+        for rid,r in ROOMS.items():
             _cleanup(r)
-            if game and r['game'] != game: continue
-            result.append({'id':rid,'name':r['name'],'game':r['game'],
+            if game and r['game']!=game: continue
+            out.append({'id':rid,'name':r['name'],'game':r['game'],
                 'players':len(r['players']),'max':MAX_PLAYERS[r['game']],
-                'started':r['started'],'countdown':_get_countdown(r)})
-    return jsonify(result)
+                'started':r['started'],'countdown':_cd(r)})
+    return jsonify(out)
 
 @app.route("/api/rooms/join", methods=["POST","OPTIONS"])
 def api_rooms_join():
     if request.method=="OPTIONS": return jsonify({}),200
-    d = request.get_json() or {}
+    d=request.get_json() or {}
     rid=d.get("room_id"); uid=d.get("uid"); name=d.get("name","Игрок")
     if not rid or not uid: return jsonify({"error":"missing"}),400
     with ROOMS_LOCK:
-        r = ROOMS.get(rid)
+        r=ROOMS.get(rid)
         if not r: return jsonify({"error":"no room"}),404
         if r['started']: return jsonify({"error":"Игра уже идёт"}),400
         if not any(p['id']==uid for p in r['players']) and len(r['players'])>=MAX_PLAYERS[r['game']]:
             return jsonify({"error":"Стол заполнен"}),400
-        r['players'] = [p for p in r['players'] if p['id']!=uid]
+        r['players']=[p for p in r['players'] if p['id']!=uid]
         r['players'].append({'id':uid,'name':name,'last_ping':time.time()})
         if not r['host_id']: r['host_id']=uid
-        if len(r['players'])>=2 and not r['countdown_start']:
-            r['countdown_start']=time.time()
-        _push_msg(r,{'type':'pl','players':[p['name'] for p in r['players']]})
+        if len(r['players'])>=2 and not r['countdown_start']: r['countdown_start']=time.time()
+        _push(r,{'type':'pl','players':[p['name'] for p in r['players']]})
         return jsonify({'ok':True,'is_host':r['host_id']==uid,
             'players':[p['name'] for p in r['players']],
-            'countdown':_get_countdown(r),'msg_seq':r['msg_seq'],'act_seq':r['act_seq']})
+            'countdown':_cd(r),'msg_seq':r['msg_seq'],'act_seq':r['act_seq']})
 
 @app.route("/api/rooms/leave", methods=["POST","OPTIONS"])
 def api_rooms_leave():
     if request.method=="OPTIONS": return jsonify({}),200
-    d = request.get_json() or {}
-    rid=d.get("room_id"); uid=d.get("uid")
+    d=request.get_json() or {}; rid=d.get("room_id"); uid=d.get("uid")
     with ROOMS_LOCK:
-        r = ROOMS.get(rid)
+        r=ROOMS.get(rid)
         if r:
             r['players']=[p for p in r['players'] if p['id']!=uid]
             if r['host_id']==uid: r['host_id']=r['players'][0]['id'] if r['players'] else None
@@ -174,7 +162,7 @@ def api_rooms_leave():
             if not r['players']:
                 r.update({'messages':[],'actions':[],'msg_seq':0,'act_seq':0,'started':False,'host_id':None})
             else:
-                _push_msg(r,{'type':'pl','players':[p['name'] for p in r['players']]})
+                _push(r,{'type':'pl','players':[p['name'] for p in r['players']]})
     return jsonify({"ok":True})
 
 @app.route("/api/rooms/poll")
@@ -188,18 +176,15 @@ def api_rooms_poll():
         for p in r['players']:
             if p['id']==uid: p['last_ping']=time.time()
         _cleanup(r)
-        cd=_get_countdown(r)
-        if cd==0 and not r['started'] and len(r['players'])>=2:
-            r['started']=True
-        result={'players':[p['name'] for p in r['players']],'is_host':r['host_id']==uid,
-                'countdown':cd,'started':r['started'],'host_id':r['host_id']}
+        cd=_cd(r)
+        if cd==0 and not r['started'] and len(r['players'])>=2: r['started']=True
+        res={'players':[p['name'] for p in r['players']],'is_host':r['host_id']==uid,
+             'countdown':cd,'started':r['started'],'host_id':r['host_id']}
         if is_host:
-            result['actions']=[a for a in r['actions'] if a['seq']>since_act]
-            result['act_seq']=r['act_seq']
+            res['actions']=[a for a in r['actions'] if a['seq']>since_act]; res['act_seq']=r['act_seq']
         else:
-            result['messages']=[m for m in r['messages'] if m['seq']>since_msg]
-            result['msg_seq']=r['msg_seq']
-    return jsonify(result)
+            res['messages']=[m for m in r['messages'] if m['seq']>since_msg]; res['msg_seq']=r['msg_seq']
+    return jsonify(res)
 
 @app.route("/api/rooms/push", methods=["POST","OPTIONS"])
 def api_rooms_push():
@@ -207,7 +192,7 @@ def api_rooms_push():
     d=request.get_json() or {}
     with ROOMS_LOCK:
         r=ROOMS.get(d.get("room_id"))
-        if r: _push_msg(r,d.get("msg"))
+        if r: _push(r,d.get("msg"))
     return jsonify({"ok":True})
 
 @app.route("/api/rooms/action", methods=["POST","OPTIONS"])
@@ -224,8 +209,7 @@ def api_rooms_action():
 
 @app.route("/api/register", methods=["POST"])
 def api_register():
-    d=request.get_json() or {}
-    tg_id=d.get("tg_id")
+    d=request.get_json() or {}; tg_id=d.get("tg_id")
     if not tg_id: return jsonify({"error":"no tg_id"}),400
     ensure_player(tg_id,d.get("username",""),d.get("first_name","Игрок"))
     return jsonify({"balance":get_balance(tg_id),"name":d.get("first_name","Игрок")})
@@ -238,8 +222,7 @@ def api_balance():
 
 @app.route("/api/update", methods=["POST"])
 def api_update():
-    d=request.get_json() or {}
-    tg_id=d.get("tg_id"); delta=d.get("delta",0)
+    d=request.get_json() or {}; tg_id=d.get("tg_id"); delta=d.get("delta",0)
     if not tg_id: return jsonify({"error":"no tg_id"}),400
     return jsonify({"balance":add_balance(tg_id,delta)})
 
@@ -248,10 +231,9 @@ def api_top():
     rows=get_top() or []
     return jsonify([{"name":r[0],"balance":r[1],"games":r[2]} for r in rows])
 
-# ── BOT ──
+# ── BOT HANDLERS ──
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    u=update.effective_user
-    ensure_player(u.id,u.username or "",u.first_name or "Игрок")
+    u=update.effective_user; ensure_player(u.id,u.username or "",u.first_name or "Игрок")
     bal=get_balance(u.id)
     kb=[[InlineKeyboardButton("🎰 Играть",web_app=WebAppInfo(url=GAME_URL))]] if GAME_URL else []
     await update.message.reply_text(
@@ -260,15 +242,13 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(kb) if kb else None)
 
 async def cmd_play(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    u=update.effective_user
-    ensure_player(u.id,u.username or "",u.first_name or "Игрок")
+    u=update.effective_user; ensure_player(u.id,u.username or "",u.first_name or "Игрок")
     if not GAME_URL: await update.message.reply_text("⚙️ GAME_URL не настроен"); return
     kb=[[InlineKeyboardButton("🎰 Casino Night",web_app=WebAppInfo(url=GAME_URL))]]
     await update.message.reply_text("Нажми:",reply_markup=InlineKeyboardMarkup(kb))
 
 async def cmd_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    u=update.effective_user
-    ensure_player(u.id,u.username or "",u.first_name or "Игрок")
+    u=update.effective_user; ensure_player(u.id,u.username or "",u.first_name or "Игрок")
     r=qone("SELECT balance,total_won,total_lost,games_played FROM players WHERE tg_id=%s",(u.id,))
     if not r: await update.message.reply_text("Напиши /start"); return
     await update.message.reply_text(
@@ -276,8 +256,7 @@ async def cmd_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown")
 
 async def cmd_daily(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    u=update.effective_user
-    ensure_player(u.id,u.username or "",u.first_name or "Игрок")
+    u=update.effective_user; ensure_player(u.id,u.username or "",u.first_name or "Игрок")
     last=get_last_daily(u.id)
     if last:
         diff=datetime.utcnow()-last.replace(tzinfo=None)
@@ -299,57 +278,44 @@ async def cmd_topup(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(args)<2: await update.message.reply_text("/topup <tg_id> <сумма>"); return
     await update.message.reply_text(f"✅ Баланс: ${add_balance(int(args[0]),int(args[1]))}")
 
-def run_bot():
-    import asyncio
-    global BOT_TOKEN
-    async def start_bot():
-        import requests as req_lib
+# ── BOT THREAD ──
+def _bot_thread():
+    async def run():
+        import requests as req
         try:
-            req_lib.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true",timeout=10)
+            req.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true",timeout=10)
             log.info("Webhook cleared")
-        except Exception as e:
-            log.warning(f"Webhook clear failed: {e}")
+        except: pass
 
-        application=Application.builder().token(BOT_TOKEN).build()
-        async def error_handler(update,context):
-            err=str(context.error)
-            if 'Conflict' in err: log.warning("Conflict: another instance")
-            else: log.error(f"Error: {err}")
-        application.add_error_handler(error_handler)
+        bot_app = Application.builder().token(BOT_TOKEN).build()
+        async def err_h(u,c):
+            e=str(c.error)
+            if 'Conflict' in e: log.warning("Conflict")
+            else: log.error(f"Bot error: {e}")
+        bot_app.add_error_handler(err_h)
         for cmd,fn in [("start",cmd_start),("play",cmd_play),("balance",cmd_balance),
                        ("daily",cmd_daily),("top",cmd_top),("topup",cmd_topup)]:
-            application.add_handler(CommandHandler(cmd,fn))
-        log.info("Bot polling...")
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        # keep running
-        while True:
-            await asyncio.sleep(3600)
+            bot_app.add_handler(CommandHandler(cmd,fn))
+        await bot_app.initialize()
+        await bot_app.start()
+        await bot_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        log.info("Bot polling started")
+        await asyncio.sleep(float('inf'))
+    asyncio.run(run())
 
-    asyncio.run(start_bot())
+# Start bot + DB on module load (for gunicorn)
+if DATABASE_URL:
+    try:
+        init_db()
+        log.info("DB initialized")
+    except Exception as e:
+        log.error(f"DB init failed: {e}")
 
-def main():
-    global BOT_TOKEN,DATABASE_URL,ADMIN_ID,GAME_URL
-    BOT_TOKEN=os.environ.get("BOT_TOKEN","").strip()
-    DATABASE_URL=os.environ.get("DATABASE_URL","").strip()
-    ADMIN_ID=int(os.environ.get("ADMIN_ID","0").strip())
-    GAME_URL=os.environ.get("GAME_URL","").strip()
-    log.info(f"BOT_TOKEN set: {bool(BOT_TOKEN)}, DB set: {bool(DATABASE_URL)}, GAME_URL: {GAME_URL}")
-    if not BOT_TOKEN: log.error("BOT_TOKEN not set!"); return
-    if not DATABASE_URL: log.error("DATABASE_URL not set!"); return
-
-    init_db()
-
-    # Bot runs in background thread
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
+if BOT_TOKEN:
+    t = threading.Thread(target=_bot_thread, daemon=True)
+    t.start()
     log.info("Bot thread started")
 
-    # Flask runs as MAIN process — Railway connects to it
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    log.info(f"Flask starting on port {port}")
-    app.run(host="0.0.0.0", port=port, threaded=True)
-
-if __name__=="__main__":
-    main()
+    app.run(host="0.0.0.0", port=port)
