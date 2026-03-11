@@ -744,6 +744,71 @@ function dkProc(d){
 function dkDraw(s){ [s.att,s.def].forEach(i=>{ const p=s.players[i]; while(p.hand.length<6&&s.deck.length>0) p.hand.push(s.deck.pop()); }); }
 function dkBC(){ dkRend(); gConns.forEach((c,ci)=>{ try{c.send({type:'gs',s:dkSan(dkSt,ci+1)})}catch(e){} }); }
 function dkNewGame(){ if(isHost) dkInit(); }
+
+// ── BALANCE SYNC ──
+const SERVER = 'https://casino-night-production.up.railway.app';
+const tg = window.Telegram?.WebApp;
+let tgUser = null;
+
+async function initServer(){
+  if(!tg) return;
+  tg.ready();
+  tgUser = tg.initDataUnsafe?.user;
+  if(!tgUser) return;
+  try{
+    const res = await fetch(SERVER+'/api/register',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tg_id:tgUser.id, username:tgUser.username||'', first_name:tgUser.first_name||'Игрок'})
+    });
+    const data = await res.json();
+    bjBal = data.balance;
+    if($('bjBal')) $('bjBal').textContent = bjBal;
+    if($('bjTot')) $('bjTot').textContent = bjBal;
+    if($('pName')){ $('pName').value = data.name; pName = data.name; }
+    toast('💰 Баланс загружен: $'+bjBal);
+  } catch(e){ console.log('Сервер недоступен, локальный режим'); }
+}
+
+async function syncBalance(delta, reason='game'){
+  if(!tgUser) return;
+  try{
+    const res = await fetch(SERVER+'/api/update',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tg_id:tgUser.id, delta, reason})
+    });
+    const data = await res.json();
+    bjBal = data.balance;
+    if($('bjBal')) $('bjBal').textContent = bjBal;
+    if($('bjTot')) $('bjTot').textContent = bjBal;
+  } catch(e){}
+}
+
+// Перехватываем конец блэкджека
+const _bjEndOrig = window.bjEnd || bjEnd;
+function bjEndWithSync(res){
+  // вычисляем дельту ДО вызова оригинала (bjB ещё актуален)
+  let delta = 0;
+  if(res==='dBust'||res==='win') delta = bjB;
+  else if(res==='bust'||res==='lose') delta = -bjB;
+  _bjEndOrig(res);
+  if(delta !== 0) syncBalance(delta, 'blackjack');
+}
+// Заменяем функцию
+window.addEventListener('load', ()=>{
+  // Переопределяем через кнопки (они уже привязаны к bjEnd)
+  const dealBtn = $('bjDeal');
+  if(dealBtn){
+    // Патчим bjEnd глобально
+    const orig = bjEnd;
+    Object.defineProperty(window,'bjEnd',{
+      get(){ return bjEndWithSync; },
+      set(v){}
+    });
+  }
+  initServer();
+});
 </script>
 </body>
 </html>
