@@ -1,284 +1,200 @@
 import os
-import json
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import pg8000.native
 from flask import Flask, request, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
-
-# ── CONFIG ──
-BOT_TOKEN   = os.environ.get("BOT_TOKEN", "")
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-ADMIN_ID    = int(os.environ.get("ADMIN_ID", "0"))
-GAME_URL    = os.environ.get("GAME_URL", "")   # GitHub Pages URL
-SERVER_URL  = os.environ.get("RAILWAY_STATIC_URL", "")
-STARTING_BALANCE = 1000
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-# ── DATABASE ──
-def get_db():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+BOT_TOKEN        = os.environ.get("BOT_TOKEN", "")
+DATABASE_URL     = os.environ.get("DATABASE_URL", "")
+ADMIN_ID         = int(os.environ.get("ADMIN_ID", "0"))
+GAME_URL         = os.environ.get("GAME_URL", "")
+STARTING_BALANCE = 1000
+
+def get_conn():
+    u = urlparse(DATABASE_URL)
+    return pg8000.native.Connection(
+        host=u.hostname,
+        port=u.port or 5432,
+        database=u.path.lstrip("/"),
+        user=u.username,
+        password=u.password,
+        ssl_context=True
+    )
+
+def qone(sql, **kw):
+    c = get_conn()
+    try:
+        rows = c.run(sql, **kw)
+        return rows[0] if rows else None
+    finally:
+        c.close()
+
+def qall(sql, **kw):
+    c = get_conn()
+    try:
+        return c.run(sql, **kw)
+    finally:
+        c.close()
+
+def qexec(sql, **kw):
+    c = get_conn()
+    try:
+        c.run(sql, **kw)
+    finally:
+        c.close()
 
 def init_db():
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS players (
-                    tg_id       BIGINT PRIMARY KEY,
-                    username    TEXT,
-                    first_name  TEXT,
-                    balance     INTEGER DEFAULT 1000,
-                    total_won   INTEGER DEFAULT 0,
-                    total_lost  INTEGER DEFAULT 0,
-                    games_played INTEGER DEFAULT 0,
-                    created_at  TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS transactions (
-                    id          SERIAL PRIMARY KEY,
-                    tg_id       BIGINT,
-                    amount      INTEGER,
-                    reason      TEXT,
-                    created_at  TIMESTAMP DEFAULT NOW()
-                )
-            """)
-        conn.commit()
-    log.info("DB initialized")
+    c = get_conn()
+    try:
+        c.run("""CREATE TABLE IF NOT EXISTS players (
+            tg_id BIGINT PRIMARY KEY,
+            username TEXT DEFAULT '',
+            first_name TEXT DEFAULT 'Игрок',
+            balance INTEGER DEFAULT 1000,
+            total_won INTEGER DEFAULT 0,
+            total_lost INTEGER DEFAULT 0,
+            games_played INTEGER DEFAULT 0,
+            last_daily TIMESTAMP DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""")
+    finally:
+        c.close()
+    log.info("DB ready")
 
-def get_player(tg_id: int):
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM players WHERE tg_id = %s", (tg_id,))
-            return cur.fetchone()
+def ensure_player(tg_id, username, first_name):
+    qexec("INSERT INTO players (tg_id,username,first_name) VALUES (:i,:u,:n) ON CONFLICT (tg_id) DO NOTHING",
+          i=tg_id, u=username, n=first_name)
 
-def create_player(tg_id: int, username: str, first_name: str):
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO players (tg_id, username, first_name, balance)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (tg_id) DO NOTHING
-                RETURNING *
-            """, (tg_id, username, first_name, STARTING_BALANCE))
-            conn.commit()
+def get_balance(tg_id):
+    r = qone("SELECT balance FROM players WHERE tg_id=:i", i=tg_id)
+    return r[0] if r else 0
 
-def update_balance(tg_id: int, delta: int, reason: str = ""):
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE players
-                SET balance = balance + %s,
-                    total_won  = total_won  + CASE WHEN %s > 0 THEN %s ELSE 0 END,
-                    total_lost = total_lost + CASE WHEN %s < 0 THEN ABS(%s) ELSE 0 END,
-                    games_played = games_played + CASE WHEN %s != 0 THEN 1 ELSE 0 END
-                WHERE tg_id = %s
-                RETURNING balance
-            """, (delta, delta, delta, delta, delta, delta, tg_id))
-            row = cur.fetchone()
-            if row:
-                cur.execute(
-                    "INSERT INTO transactions (tg_id, amount, reason) VALUES (%s, %s, %s)",
-                    (tg_id, delta, reason)
-                )
-            conn.commit()
-            return row["balance"] if row else None
+def add_balance(tg_id, delta):
+    qexec("""UPDATE players SET
+        balance=balance+:d,
+        total_won=total_won+(CASE WHEN :d>0 THEN :d ELSE 0 END),
+        total_lost=total_lost+(CASE WHEN :d<0 THEN :d*-1 ELSE 0 END),
+        games_played=games_played+1
+        WHERE tg_id=:i""", d=delta, i=tg_id)
+    return get_balance(tg_id)
 
-def get_top(limit=10):
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT first_name, username, balance, games_played
-                FROM players
-                ORDER BY balance DESC
-                LIMIT %s
-            """, (limit,))
-            return cur.fetchall()
+def get_last_daily(tg_id):
+    r = qone("SELECT last_daily FROM players WHERE tg_id=:i", i=tg_id)
+    return r[0] if r else None
 
-# ── FLASK API ──
+def set_last_daily(tg_id):
+    qexec("UPDATE players SET last_daily=NOW() WHERE tg_id=:i", i=tg_id)
+
+def get_top():
+    return qall("SELECT first_name,balance,games_played FROM players ORDER BY balance DESC LIMIT 10")
+
 app = Flask(__name__)
 
-@app.route("/api/balance", methods=["GET"])
-def api_balance():
-    tg_id = request.args.get("tg_id", type=int)
-    if not tg_id:
-        return jsonify({"error": "no tg_id"}), 400
-    player = get_player(tg_id)
-    if not player:
-        return jsonify({"error": "player not found"}), 404
-    return jsonify({"balance": player["balance"], "name": player["first_name"]})
-
-@app.route("/api/update", methods=["POST"])
-def api_update():
-    data = request.get_json()
-    tg_id  = data.get("tg_id")
-    delta  = data.get("delta", 0)
-    reason = data.get("reason", "game")
-    if not tg_id:
-        return jsonify({"error": "no tg_id"}), 400
-    new_bal = update_balance(tg_id, delta, reason)
-    if new_bal is None:
-        return jsonify({"error": "player not found"}), 404
-    return jsonify({"balance": new_bal})
+@app.route("/health")
+def health(): return "ok"
 
 @app.route("/api/register", methods=["POST"])
 def api_register():
-    data = request.get_json()
-    tg_id      = data.get("tg_id")
-    username   = data.get("username", "")
-    first_name = data.get("first_name", "Игрок")
-    if not tg_id:
-        return jsonify({"error": "no tg_id"}), 400
-    create_player(tg_id, username, first_name)
-    player = get_player(tg_id)
-    return jsonify({"balance": player["balance"], "name": player["first_name"]})
+    d = request.get_json() or {}
+    tg_id = d.get("tg_id")
+    if not tg_id: return jsonify({"error":"no tg_id"}), 400
+    ensure_player(tg_id, d.get("username",""), d.get("first_name","Игрок"))
+    return jsonify({"balance": get_balance(tg_id), "name": d.get("first_name","Игрок")})
 
-@app.route("/api/top", methods=["GET"])
+@app.route("/api/balance")
+def api_balance():
+    tg_id = request.args.get("tg_id", type=int)
+    if not tg_id: return jsonify({"error":"no tg_id"}), 400
+    return jsonify({"balance": get_balance(tg_id)})
+
+@app.route("/api/update", methods=["POST"])
+def api_update():
+    d = request.get_json() or {}
+    tg_id = d.get("tg_id"); delta = d.get("delta", 0)
+    if not tg_id: return jsonify({"error":"no tg_id"}), 400
+    return jsonify({"balance": add_balance(tg_id, delta)})
+
+@app.route("/api/top")
 def api_top():
-    rows = get_top()
-    return jsonify([dict(r) for r in rows])
+    rows = get_top() or []
+    return jsonify([{"name":r[0],"balance":r[1],"games":r[2]} for r in rows])
 
-@app.route("/health")
-def health():
-    return "ok"
-
-# ── BOT HANDLERS ──
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    create_player(user.id, user.username or "", user.first_name or "Игрок")
-    player = get_player(user.id)
-
-    text = (
-        f"🎰 *Добро пожаловать в Casino Night, {user.first_name}!*\n\n"
-        f"💰 Ваш стартовый баланс: *${player['balance']}*\n\n"
-        "Доступные команды:\n"
-        "🃏 /play — Открыть казино\n"
-        "💵 /balance — Мой баланс\n"
-        "🎁 /daily — Ежедневный бонус\n"
-        "👑 /top — Таблица лидеров\n"
-        "❓ /help — Помощь"
+    u = update.effective_user
+    ensure_player(u.id, u.username or "", u.first_name or "Игрок")
+    bal = get_balance(u.id)
+    kb = [[InlineKeyboardButton("🎰 Играть", web_app=WebAppInfo(url=GAME_URL))]] if GAME_URL else []
+    await update.message.reply_text(
+        f"🎰 *Casino Night — {u.first_name}!*\n\n💰 Баланс: *${bal}*\n\n"
+        "🃏 /play — открыть казино\n💵 /balance — баланс\n🎁 /daily — бонус $500\n👑 /top — топ",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(kb) if kb else None
     )
-
-    keyboard = [[InlineKeyboardButton("🎰 Играть", web_app=WebAppInfo(url=GAME_URL))]]
-    await update.message.reply_text(text, parse_mode="Markdown",
-                                    reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def cmd_play(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    create_player(user.id, user.username or "", user.first_name or "Игрок")
-    keyboard = [[InlineKeyboardButton("🎰 Открыть Casino Night", web_app=WebAppInfo(url=GAME_URL))]]
-    await update.message.reply_text(
-        "🃏 Нажми кнопку чтобы открыть казино:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    u = update.effective_user
+    ensure_player(u.id, u.username or "", u.first_name or "Игрок")
+    if not GAME_URL:
+        await update.message.reply_text("⚙️ GAME_URL не настроен"); return
+    kb = [[InlineKeyboardButton("🎰 Casino Night", web_app=WebAppInfo(url=GAME_URL))]]
+    await update.message.reply_text("Нажми:", reply_markup=InlineKeyboardMarkup(kb))
 
 async def cmd_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    create_player(user.id, user.username or "", user.first_name or "Игрок")
-    player = get_player(user.id)
-    text = (
-        f"💰 *Баланс: ${player['balance']}*\n\n"
-        f"🎮 Игр сыграно: {player['games_played']}\n"
-        f"📈 Выиграно всего: ${player['total_won']}\n"
-        f"📉 Проиграно всего: ${player['total_lost']}"
-    )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    u = update.effective_user
+    ensure_player(u.id, u.username or "", u.first_name or "Игрок")
+    r = qone("SELECT balance,total_won,total_lost,games_played FROM players WHERE tg_id=:i", i=u.id)
+    if not r: await update.message.reply_text("Напиши /start"); return
+    await update.message.reply_text(
+        f"💰 *Баланс: ${r[0]}*\n🎮 Игр: {r[3]}\n📈 Выиграно: ${r[1]}\n📉 Проиграно: ${r[2]}",
+        parse_mode="Markdown")
 
 async def cmd_daily(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    create_player(user.id, user.username or "", user.first_name or "Игрок")
-    # Check last daily bonus
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT created_at FROM transactions
-                WHERE tg_id = %s AND reason = 'daily'
-                ORDER BY created_at DESC LIMIT 1
-            """, (user.id,))
-            last = cur.fetchone()
-
+    u = update.effective_user
+    ensure_player(u.id, u.username or "", u.first_name or "Игрок")
+    last = get_last_daily(u.id)
     if last:
-        diff = datetime.now() - last["created_at"].replace(tzinfo=None)
-        if diff.total_seconds() < 86400:
-            hours_left = int((86400 - diff.total_seconds()) / 3600)
-            await update.message.reply_text(
-                f"⏳ Ежедневный бонус уже получен!\n"
-                f"Следующий через *{hours_left} ч.*",
-                parse_mode="Markdown"
-            )
-            return
-
-    bonus = 500
-    new_bal = update_balance(user.id, bonus, "daily")
-    await update.message.reply_text(
-        f"🎁 *Ежедневный бонус получен!*\n\n"
-        f"➕ +${bonus}\n"
-        f"💰 Баланс: *${new_bal}*",
-        parse_mode="Markdown"
-    )
+        diff = datetime.utcnow() - last.replace(tzinfo=None)
+        if diff < timedelta(hours=24):
+            h = int((timedelta(hours=24) - diff).total_seconds() / 3600)
+            await update.message.reply_text(f"⏳ Следующий бонус через *{h} ч.*", parse_mode="Markdown"); return
+    add_balance(u.id, 500); set_last_daily(u.id)
+    await update.message.reply_text(f"🎁 *+$500!*\n💰 Баланс: *${get_balance(u.id)}*", parse_mode="Markdown")
 
 async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    rows = get_top(10)
+    rows = get_top() or []
     medals = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-    lines = ["👑 *Таблица лидеров Casino Night*\n"]
-    for i, row in enumerate(rows):
-        name = row["first_name"] or row["username"] or "Игрок"
-        lines.append(f"{medals[i]} {name} — *${row['balance']}*")
+    lines = ["👑 *Топ Casino Night*\n"] + [f"{medals[i]} {r[0]} — *${r[1]}*" for i,r in enumerate(rows)]
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def cmd_topup(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Admin only: topup <tg_id> <amount>"""
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Нет доступа")
-        return
+    if update.effective_user.id != ADMIN_ID: return
     args = ctx.args
-    if len(args) < 2:
-        await update.message.reply_text("Использование: /topup <tg_id> <сумма>")
-        return
-    tg_id, amount = int(args[0]), int(args[1])
-    new_bal = update_balance(tg_id, amount, "admin_topup")
-    await update.message.reply_text(f"✅ Пополнено. Новый баланс: ${new_bal}")
+    if len(args) < 2: await update.message.reply_text("/topup <tg_id> <сумма>"); return
+    bal = add_balance(int(args[0]), int(args[1]))
+    await update.message.reply_text(f"✅ Баланс: ${bal}")
 
-async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎰 *Casino Night — Помощь*\n\n"
-        "/play — Открыть казино\n"
-        "/balance — Мой баланс и статистика\n"
-        "/daily — Ежедневный бонус $500\n"
-        "/top — Топ-10 игроков\n\n"
-        "💡 Баланс автоматически синхронизируется с игрой!",
-        parse_mode="Markdown"
-    )
-
-# ── MAIN ──
 def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
 def main():
+    if not BOT_TOKEN: log.error("BOT_TOKEN not set!"); return
+    if not DATABASE_URL: log.error("DATABASE_URL not set!"); return
     init_db()
-
-    # Run Flask in background thread
-    t = threading.Thread(target=run_flask, daemon=True)
-    t.start()
-
-    # Run bot
+    threading.Thread(target=run_flask, daemon=True).start()
+    log.info("Flask started")
     application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start",   cmd_start))
-    application.add_handler(CommandHandler("play",    cmd_play))
-    application.add_handler(CommandHandler("balance", cmd_balance))
-    application.add_handler(CommandHandler("daily",   cmd_daily))
-    application.add_handler(CommandHandler("top",     cmd_top))
-    application.add_handler(CommandHandler("topup",   cmd_topup))
-    application.add_handler(CommandHandler("help",    cmd_help))
-
-    log.info("Bot started!")
+    for cmd, fn in [("start",cmd_start),("play",cmd_play),("balance",cmd_balance),
+                    ("daily",cmd_daily),("top",cmd_top),("topup",cmd_topup)]:
+        application.add_handler(CommandHandler(cmd, fn))
+    log.info("Bot polling...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
