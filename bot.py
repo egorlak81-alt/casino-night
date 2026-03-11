@@ -276,22 +276,31 @@ if __name__=="__main__":
         init_db()
 
     def run_bot():
-        async def _run():
-            bot_app=Application.builder().token(BOT_TOKEN).build()
-            async def err_h(u,c):
-                e=str(c.error)
-                if 'Conflict' in e: log.warning("Conflict - ignoring")
-                else: log.error(f"Bot error: {e}")
-            bot_app.add_error_handler(err_h)
-            for cmd,fn in [("start",cmd_start),("play",cmd_play),("balance",cmd_balance),
-                           ("daily",cmd_daily),("top",cmd_top),("topup",cmd_topup)]:
-                bot_app.add_handler(CommandHandler(cmd,fn))
-            await bot_app.initialize()
-            await bot_app.start()
-            await bot_app.updater.start_polling(allowed_updates=Update.ALL_TYPES,drop_pending_updates=True)
-            log.info("Bot polling started")
-            await asyncio.sleep(float('inf'))
-        asyncio.run(_run())
+        while True:
+            try:
+                async def _run():
+                    bot_app=Application.builder().token(BOT_TOKEN).build()
+                    async def err_h(u,c):
+                        e=str(c.error)
+                        if 'Conflict' in e: log.warning("Conflict - ignoring")
+                        else: log.error(f"Bot error: {e}")
+                    bot_app.add_error_handler(err_h)
+                    for cmd,fn in [("start",cmd_start),("play",cmd_play),("balance",cmd_balance),
+                                   ("daily",cmd_daily),("top",cmd_top),("topup",cmd_topup)]:
+                        bot_app.add_handler(CommandHandler(cmd,fn))
+                    await bot_app.initialize()
+                    await bot_app.start()
+                    await bot_app.updater.start_polling(
+                        allowed_updates=Update.ALL_TYPES,
+                        drop_pending_updates=True,
+                        error_callback=lambda e: None
+                    )
+                    log.info("Bot polling started")
+                    await asyncio.sleep(float('inf'))
+                asyncio.run(_run())
+            except Exception as e:
+                log.warning(f"Bot crashed: {e}, restarting in 5s...")
+                time.sleep(5)
 
     threading.Thread(target=run_bot,daemon=True).start()
     log.info("Bot thread started")
