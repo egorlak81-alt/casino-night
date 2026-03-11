@@ -196,6 +196,24 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
 .wd{color:var(--dim);font-style:italic;font-size:15px;text-align:center}
 .wc{display:flex;gap:8px;justify-content:center}
 .wcrd{width:50px;height:74px}
+/* ROOMS */
+#rooms{background:radial-gradient(ellipse at 50% 20%,#1a3520 0%,var(--bg) 70%);padding:20px;gap:14px;padding-top:36px}
+.rooms-title{font-family:'Cinzel',serif;font-size:22px;color:var(--gold);text-align:center;letter-spacing:2px;margin-bottom:4px}
+.rooms-sub{color:var(--dim);font-style:italic;font-size:14px;text-align:center;margin-bottom:16px}
+.room-card{width:100%;max-width:380px;background:rgba(255,255,255,.04);border:1px solid rgba(200,168,75,.2);border-radius:14px;padding:14px 16px;cursor:pointer;transition:all .2s;margin-bottom:10px;display:flex;align-items:center;gap:14px}
+.room-card:active{transform:scale(.97);background:rgba(200,168,75,.1)}
+.room-card.full{opacity:.4;cursor:not-allowed}
+.room-card.playing{border-color:rgba(200,168,75,.5);background:rgba(200,168,75,.05)}
+.room-icon{font-size:32px;flex-shrink:0}
+.room-info{flex:1}
+.room-name{font-family:'Cinzel',serif;font-size:14px;color:var(--gold2);font-weight:600}
+.room-status{font-size:12px;color:var(--dim);margin-top:2px}
+.room-count{font-family:'Cinzel',serif;font-size:18px;color:var(--gold);text-align:right;flex-shrink:0}
+.room-dots{display:flex;gap:4px;margin-top:4px;justify-content:flex-end}
+.rdot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.15)}
+.rdot.on{background:#44cc77}
+.cdtimer{font-family:'Cinzel',serif;font-size:36px;color:var(--gold);text-align:center;margin:8px 0}
+.cdlabel{font-size:12px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;text-align:center}
 /* TOAST */
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:rgba(20,40,25,.95);border:1px solid rgba(200,168,75,.3);border-radius:20px;padding:10px 20px;font-size:14px;color:var(--text);white-space:nowrap;z-index:300;opacity:0;transition:all .3s;pointer-events:none}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -222,29 +240,26 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
   </div>
 </div>
 
-<!-- LOBBY -->
+<!-- ROOMS LIST -->
+<div id="rooms" class="screen hidden">
+  <div class="rooms-title" id="roomsTitle">Покер</div>
+  <div class="rooms-sub">Выберите стол</div>
+  <div id="roomsList" style="width:100%;max-width:380px"></div>
+  <button class="btn btn-b" style="max-width:380px;margin-top:4px" id="btnRoomsBack">← Назад</button>
+</div>
+
+<!-- LOBBY / WAITING ROOM -->
 <div id="lobby" class="screen hidden">
-  <div class="ltitle">Мультиплеер</div>
+  <div class="ltitle" id="lbTitle">Ожидание</div>
   <div class="lgame" id="lbGame"></div>
-  <div class="lsec">
-    <div class="lstitle">Создать комнату</div>
-    <button class="btn btn-g" id="btnCreate">Создать игру</button>
-    <div id="rcBox" class="rcode-box" style="display:none">
-      <div class="rcode-lbl">Код — отправь другу</div>
-      <div class="rcode" id="rcDisp">----</div>
-    </div>
-    <div id="waitBox" style="display:none">
-      <div class="stxt" id="wStat">Ожидание...</div>
-      <div id="pList"></div>
-      <button class="btn btn-g" id="btnStart" style="margin-top:12px;display:none">▶ Начать игру</button>
-    </div>
+  <div class="lsec" style="width:100%;max-width:380px">
+    <div class="cdlabel">ИГРА НАЧНЁТСЯ ЧЕРЕЗ</div>
+    <div class="cdtimer" id="cdTimer">—</div>
+    <div class="lstitle" style="margin-top:8px">Игроки за столом</div>
+    <div id="pList"></div>
+    <div class="stxt" id="wStat" style="margin-top:10px">Ожидание второго игрока...</div>
   </div>
-  <div class="lsec">
-    <div class="lstitle">Войти в комнату</div>
-    <input class="cinput" id="codeIn" placeholder="XXXX" maxlength="4">
-    <button class="btn btn-o" id="btnJoin">Войти</button>
-  </div>
-  <button class="btn btn-b" id="btnLbBack">← Назад</button>
+  <button class="btn btn-b" style="max-width:380px;margin-top:8px" id="btnLbBack">← Покинуть стол</button>
 </div>
 
 <!-- BLACKJACK -->
@@ -389,9 +404,33 @@ function rc(card,cls=''){
   return `<div class="card ${col} ${cls}"><div class="tl">${card.r}<br>${card.s}</div><div class="cs">${card.s}</div><div class="br">${card.r}<br>${card.s}</div></div>`;
 }
 
+// ── SERVER CONFIG ──
+const SERVER = 'https://casino-night-production.up.railway.app';
+
+// ── ROOM STATE ──
+let curRoomId = null;
+let myUid = null;
+let isHost = false;
+let lbPlayers = [];
+let pollTimer = null;
+let lastMsgSeq = 0;
+let lastActSeq = 0;
+let gameStarted = false;
+let cdInterval = null;
+
+function getUid(){
+  if(myUid) return myUid;
+  if(window.Telegram?.WebApp?.initDataUnsafe?.user?.id){
+    myUid = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+    return myUid;
+  }
+  let id = localStorage.getItem('casino_uid');
+  if(!id){ id='u'+Date.now()+Math.floor(Math.random()*9999); localStorage.setItem('casino_uid',id); }
+  myUid = id; return myUid;
+}
+
 // ── INIT ──
 window.addEventListener('load',()=>{
-  // Загружаем сохранённое имя
   const savedName = localStorage.getItem('casinoName');
   if(savedName){ $('pName').value=savedName; pName=savedName; }
   // Menu
@@ -401,13 +440,14 @@ window.addEventListener('load',()=>{
   $('gcDk').addEventListener('click',()=>openGame('durak'));
   // Back buttons
   $('bjBack').addEventListener('click',()=>showScreen('menu'));
-  $('pkBack').addEventListener('click',()=>showScreen('menu'));
+  $('pkBack').addEventListener('click',()=>{ leaveRoom(); showScreen('menu'); });
+  $('dkBack').addEventListener('click',()=>{ leaveRoom(); showScreen('menu'); });
   $('diBack').addEventListener('click',()=>showScreen('menu'));
-  $('dkBack').addEventListener('click',()=>showScreen('menu'));
-  $('btnLbBack').addEventListener('click',()=>showScreen('menu'));
+  $('btnRoomsBack').addEventListener('click',()=>showScreen('menu'));
+  $('btnLbBack').addEventListener('click',()=>{ leaveRoom(); showScreen('rooms'); loadRooms(); });
   // Winner
   $('wAgain').addEventListener('click',()=>{ $('wov').classList.add('hidden'); if(curGame==='blackjack')bjReset(); else if(curGame==='dice')diNewGame(); else if(curGame==='durak')dkNewGame(); else if(curGame==='poker')pkNewHand(); });
-  $('wMenu').addEventListener('click',()=>{ $('wov').classList.add('hidden'); showScreen('menu'); });
+  $('wMenu').addEventListener('click',()=>{ $('wov').classList.add('hidden'); leaveRoom(); showScreen('menu'); });
   // BJ chips
   $('c5').addEventListener('click',()=>bjBet(5)); $('c10').addEventListener('click',()=>bjBet(10));
   $('c25').addEventListener('click',()=>bjBet(25)); $('c50').addEventListener('click',()=>bjBet(50));
@@ -416,10 +456,6 @@ window.addEventListener('load',()=>{
   $('bjStand').addEventListener('click',bjStand); $('bjDbl').addEventListener('click',bjDouble);
   // Dice
   $('diRoll').addEventListener('click',diRoll);
-  // Lobby
-  $('btnCreate').addEventListener('click',createRoom);
-  $('btnJoin').addEventListener('click',joinRoom);
-  $('btnStart').addEventListener('click',hostStart);
   // Poker
   $('pkFold').addEventListener('click',()=>pkAct('fold'));
   $('pkCheck').addEventListener('click',()=>pkAct('check'));
@@ -430,151 +466,226 @@ window.addEventListener('load',()=>{
   // Durak
   $('dkTake').addEventListener('click',dkTake);
   $('dkPass').addEventListener('click',dkPass);
-  // SW
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 });
 
 function openGame(game){
-  pName=$('pName').value.trim()||'Игрок';
+  pName = $('pName').value.trim() || 'Игрок';
   localStorage.setItem('casinoName', pName);
-  curGame=game;
+  curGame = game;
   if(game==='blackjack'){ bjInit(); showScreen('blackjack'); return; }
   if(game==='dice'){ diNewGame(); showScreen('dice'); return; }
-  $('lbGame').textContent={poker:'Покер',durak:'Дурак'}[game]||game;
-  $('rcBox').style.display='none'; $('waitBox').style.display='none'; $('wStat').style.color=''; $('wStat').textContent='Ожидание...';
-  $('btnStart').style.display='none'; $('codeIn').value='';
-  showScreen('lobby');
+  $('roomsTitle').textContent = game==='poker' ? '🃏 Покер' : '🂮 Дурак';
+  showScreen('rooms');
+  loadRooms();
 }
 
-// ── PEER ──
-let peer=null,hConn=null,gConns=[],isHost=false,lbPlayers=[];
-
-function genCode(){ return Math.random().toString(36).slice(2,6).toUpperCase(); }
-
-const PEER_CONFIG={config:{iceServers:[
-  {urls:'stun:stun.l.google.com:19302'},
-  {urls:'stun:stun1.l.google.com:19302'},
-  {urls:'stun:stun2.l.google.com:19302'},
-  {urls:'stun:stun.cloudflare.com:3478'}
-]},debug:0};
-
-function loadPeer(cb){
-  if(typeof Peer!=='undefined'){ cb(); return; }
-  const s=document.createElement('script');
-  s.src='https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-  s.onload=cb;
-  s.onerror=()=>{
-    const s2=document.createElement('script');
-    s2.src='https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js';
-    s2.onload=cb; s2.onerror=()=>toast('Нет интернета');
-    document.head.appendChild(s2);
-  };
-  document.head.appendChild(s);
-}
-
-function createRoom(){
-  const code=genCode();
-  $('rcDisp').textContent=code; $('rcBox').style.display='block'; $('waitBox').style.display='block';
-  $('wStat').textContent='Подключение...';
-  isHost=true; lbPlayers=[{name:pName,id:'host'}]; renderLbPlayers();
-  if(peer){ try{peer.destroy()}catch(e){} peer=null; }
-  loadPeer(()=>{
-    try{
-      peer=new Peer('csn-'+code, PEER_CONFIG);
-      peer.on('open',()=>{
-        $('wStat').innerHTML='✅ <b>Комната готова!</b> Код: <b>'+code+'</b>';
-        $('wStat').style.color='#44cc77';
-        gConns=[];
-        toast('✅ Комната создана! Код: '+code, 3000);
-      });
-      peer.on('connection',c=>{
-        c.on('open',()=>{ gConns.push(c); c.send({type:'joined',players:lbPlayers.map(p=>p.name)}); });
-        c.on('data',d=>onHost(c,d));
-        c.on('close',()=>{ gConns=gConns.filter(x=>x!==c); lbPlayers=lbPlayers.filter(p=>p.id!==c.peer); renderLbPlayers(); bc({type:'pl',players:lbPlayers.map(p=>p.name)}); });
-        c.on('error',e=>console.log('conn err',e));
-      });
-      peer.on('error',e=>{
-        if(e.type==='unavailable-id'){ setTimeout(createRoom,500); }
-        else {
-          $('wStat').innerHTML='❌ Не удалось создать комнату ('+e.type+')';
-          $('wStat').style.color='#cc4444';
-          toast('❌ Ошибка: '+e.type, 3000);
-        }
-      });
-      peer.on('disconnected',()=>{ try{peer.reconnect();}catch(e){} });
-    }catch(e){ toast('Ошибка: '+e.message); }
-  });
-}
-
-function joinRoom(){
-  const code=$('codeIn').value.trim().toUpperCase();
-  if(code.length<4){ toast('Введите 4 символа'); return; }
-  isHost=false;
-  $('waitBox').style.display='block'; $('wStat').textContent='Подключение...';
-  if(peer){ try{peer.destroy()}catch(e){} peer=null; }
-  loadPeer(()=>{
-    try{
-      peer=new Peer(undefined, PEER_CONFIG);
-      peer.on('open',()=>{
-        const c=peer.connect('csn-'+code,{reliable:true});
-        hConn=c;
-        c.on('open',()=>{
-          c.send({type:'hello',name:pName});
-          $('wStat').innerHTML='✅ <b>Подключено!</b> Ожидание хоста...';
-          $('wStat').style.color='#44cc77';
-        });
-        c.on('data',d=>onClient(d));
-        c.on('close',()=>toast('Соединение разорвано'));
-        c.on('error',()=>toast('Ошибка соединения'));
-        setTimeout(()=>{
-          if(!c.open){
-            $('wStat').innerHTML='❌ Не удалось подключиться';
-            $('wStat').style.color='#cc4444';
-            toast('❌ Комната не найдена', 3000);
-          }
-        },8000);
-      });
-      peer.on('error',e=>{
-        if(e.type==='peer-unavailable'){
-          $('wStat').innerHTML='❌ Комната <b>'+code+'</b> не найдена';
-          $('wStat').style.color='#cc4444';
-          toast('❌ Комната не найдена', 3000);
-        } else {
-          $('wStat').innerHTML='❌ Ошибка подключения: '+e.type;
-          $('wStat').style.color='#cc4444';
-          toast('❌ Ошибка: '+e.type, 3000);
-        }
-      });
-    }catch(e){ toast('Ошибка: '+e.message); }
-  });
-}
-
-function onHost(c,d){
-  if(d.type==='hello'){
-    if(!lbPlayers.find(p=>p.id===c.peer)) lbPlayers.push({name:d.name,id:c.peer,conn:c});
-    renderLbPlayers(); bc({type:'pl',players:lbPlayers.map(p=>p.name)});
-    if(lbPlayers.length>=2) $('btnStart').style.display='block';
+// ── ROOMS LIST ──
+async function loadRooms(){
+  $('roomsList').innerHTML = '<div class="stxt">Загрузка столов...</div>';
+  try{
+    const r = await fetch(`${SERVER}/api/rooms?game=${curGame}`);
+    const rooms = await r.json();
+    renderRoomsList(rooms);
+  }catch(e){
+    $('roomsList').innerHTML = '<div class="stxt" style="color:#cc4444">❌ Нет связи с сервером</div>';
   }
+}
+
+function renderRoomsList(rooms){
+  const icon = curGame==='poker' ? '🃏' : '🂮';
+  const maxP = curGame==='poker' ? 6 : 4;
+  $('roomsList').innerHTML = rooms.map(r=>{
+    const isFull = r.players >= r.max && !r.started;
+    const isPlaying = r.started;
+    let status = '';
+    let cls = '';
+    if(isPlaying){
+      status = '🟡 Идёт игра';
+      cls = 'playing';
+    } else if(isFull){
+      status = '🔴 Стол заполнен';
+      cls = 'full';
+    } else if(r.countdown !== null && r.countdown > 0){
+      status = `⏳ Старт через ${r.countdown}с`;
+    } else if(r.players === 0){
+      status = '🟢 Свободно';
+    } else {
+      status = `🟢 ${r.players} игр. — ждут`;
+    }
+    const dots = Array.from({length:r.max},(_,i)=>
+      `<div class="rdot${i<r.players?' on':''}"></div>`).join('');
+    return `<div class="room-card${cls?' '+cls:''}" onclick="${isFull||isPlaying?'toast("'+status+'")':'joinServerRoom("'+r.id+'")'}" >
+      <div class="room-icon">${icon}</div>
+      <div class="room-info">
+        <div class="room-name">${r.name}</div>
+        <div class="room-status">${status}</div>
+      </div>
+      <div class="room-count">
+        <div>${r.players}/${r.max}</div>
+        <div class="room-dots">${dots}</div>
+      </div>
+    </div>`;
+  }).join('') + `<button class="btn btn-b" style="margin-top:4px" onclick="loadRooms()">🔄 Обновить</button>`;
+}
+
+// ── JOIN ROOM ──
+async function joinServerRoom(roomId){
+  $('roomsList').innerHTML = '<div class="stxt">Подключение...</div>';
+  try{
+    const resp = await fetch(`${SERVER}/api/rooms/join`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({room_id:roomId, uid:getUid(), name:pName})
+    });
+    const data = await resp.json();
+    if(data.error){ toast('❌ '+data.error); loadRooms(); return; }
+    curRoomId = roomId;
+    isHost = data.is_host;
+    gameStarted = false;
+    lastMsgSeq = data.msg_seq || 0;
+    lastActSeq = data.act_seq || 0;
+    lbPlayers = data.players.map(n=>({name:n}));
+    $('lbGame').textContent = curGame==='poker' ? '🃏 Покер' : '🂮 Дурак';
+    $('lbTitle').textContent = rooms_name(roomId);
+    renderLbPlayers();
+    updateCdDisplay(data.countdown);
+    showScreen('lobby');
+    startPolling();
+  }catch(e){ toast('❌ Ошибка соединения'); loadRooms(); }
+}
+
+function rooms_name(rid){
+  const parts = rid.split('_');
+  return (parts[0]==='poker'?'Покер':'Дурак')+' · Стол '+parts[1];
+}
+
+// ── LEAVE ROOM ──
+async function leaveRoom(){
+  stopPolling();
+  if(!curRoomId) return;
+  const rid = curRoomId; curRoomId = null; gameStarted = false;
+  try{
+    await fetch(`${SERVER}/api/rooms/leave`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({room_id:rid, uid:getUid()})
+    });
+  }catch(e){}
+}
+
+// ── POLLING ──
+function startPolling(){
+  stopPolling();
+  pollTimer = setInterval(doPoll, 2000);
+  doPoll();
+}
+
+function stopPolling(){
+  if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+  if(cdInterval){ clearInterval(cdInterval); cdInterval=null; }
+}
+
+async function doPoll(){
+  if(!curRoomId) return;
+  try{
+    const url = `${SERVER}/api/rooms/poll?room_id=${curRoomId}&uid=${getUid()}&since_msg=${lastMsgSeq}&since_act=${lastActSeq}&is_host=${isHost?1:0}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if(data.error){ return; }
+
+    // Check if host changed
+    if(data.host_id === getUid() && !isHost){ isHost=true; }
+
+    // Update players
+    lbPlayers = data.players.map(n=>({name:n}));
+    renderLbPlayers();
+
+    // Countdown
+    updateCdDisplay(data.countdown);
+
+    // Game started
+    if(data.started && !gameStarted){
+      gameStarted = true;
+      stopPolling();
+      if(isHost){ hostStart(); }
+      // Start game polling for in-game comms
+      pollTimer = setInterval(doPoll, 1500);
+    }
+
+    // Process messages/actions
+    if(isHost && data.actions){
+      for(const act of data.actions){
+        if(act.seq > lastActSeq){
+          lastActSeq = act.seq;
+          onHost(null, act.data);
+        }
+      }
+      if(data.act_seq) lastActSeq = Math.max(lastActSeq, data.act_seq - data.actions.length);
+    }
+    if(!isHost && data.messages){
+      for(const msg of data.messages){
+        if(msg.seq > lastMsgSeq){
+          lastMsgSeq = msg.seq;
+          onClient(msg.data);
+        }
+      }
+    }
+  }catch(e){ console.log('poll err',e); }
+}
+
+function updateCdDisplay(cd){
+  if(cd === null || cd === undefined){
+    $('cdTimer').textContent = '—';
+    $('wStat').textContent = 'Ожидание второго игрока...';
+  } else if(cd === 0){
+    $('cdTimer').textContent = '🎮';
+    $('wStat').textContent = 'Запуск игры!';
+  } else {
+    $('cdTimer').textContent = cd + 'с';
+    $('wStat').textContent = '✅ За столом игроки. Ждём ещё...';
+  }
+}
+
+// ── NETWORKING (replaces PeerJS) ──
+function bc(data){
+  if(!curRoomId) return;
+  fetch(`${SERVER}/api/rooms/push`,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({room_id:curRoomId, uid:getUid(), msg:data})
+  }).catch(e=>console.log('push err',e));
+}
+
+function sh(data){
+  if(!curRoomId) return;
+  fetch(`${SERVER}/api/rooms/action`,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({room_id:curRoomId, uid:getUid(), action:data})
+  }).catch(e=>console.log('action err',e));
+}
+
+function onHost(c, d){
+  if(!d) return;
   if(d.type==='ga'){ if(curGame==='poker') pkProc(d); if(curGame==='durak') dkProc(d); }
 }
 
 function onClient(d){
-  if(d.type==='joined'||d.type==='pl'){
-    lbPlayers=d.players.map(n=>({name:n})); renderLbPlayers();
-    if(d.type==='joined') $('wStat').textContent='Вы в комнате!';
-  }
+  if(!d) return;
+  if(d.type==='pl'){ lbPlayers=d.players.map(n=>({name:n})); renderLbPlayers(); }
   if(d.type==='gs'){ if(curGame==='poker'){ pkSt=d.s; pkRend(); } if(curGame==='durak'){ dkSt=d.s; dkRend(); } }
   if(d.type==='start'){ if(d.game==='poker') pkClientStart(d); if(d.game==='durak') dkClientStart(d); }
 }
 
 function renderLbPlayers(){
-  $('pList').innerHTML=lbPlayers.map((p,i)=>
-    `<div class="prow"><div class="pdot"></div><span>${p.name}${i===0?' (хост)':''}</span></div>`).join('');
+  const el = $('pList');
+  if(!el) return;
+  el.innerHTML = lbPlayers.map((p,i)=>
+    `<div class="prow"><div class="pdot"></div><span>${p.name}${i===0?' 👑':''}</span></div>`).join('');
 }
 
-function bc(data){ gConns.forEach(c=>{ try{c.send(data)}catch(e){} }); }
-function sh(data){ if(hConn) try{hConn.send(data)}catch(e){} }
-function hostStart(){ if(curGame==='poker') pkInit(); if(curGame==='durak') dkInit(); }
+function hostStart(){
+  if(curGame==='poker') pkInit();
+  if(curGame==='durak') dkInit();
+}
+
 
 // ── BLACKJACK ──
 let bjD=[],bjP=[],bjDl=[],bjB=0,bjBal=1000,bjOn=false;
@@ -801,7 +912,7 @@ function dkBC(){ dkRend(); gConns.forEach((c,ci)=>{ try{c.send({type:'gs',s:dkSa
 function dkNewGame(){ if(isHost) dkInit(); }
 
 // ── BALANCE SYNC ──
-const SERVER = 'https://casino-night-production.up.railway.app';
+
 const tg = window.Telegram?.WebApp;
 let tgUser = null;
 
