@@ -12,11 +12,11 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-BOT_TOKEN        = os.environ.get("BOT_TOKEN", "")
-DATABASE_URL     = os.environ.get("DATABASE_URL", "")
-ADMIN_ID         = int(os.environ.get("ADMIN_ID", "0"))
-GAME_URL         = os.environ.get("GAME_URL", "")
-STARTING_BALANCE = 1000
+# Глобальные переменные — заполняются в main()
+BOT_TOKEN    = ""
+DATABASE_URL = ""
+ADMIN_ID     = 0
+GAME_URL     = ""
 
 def get_conn():
     u = urlparse(DATABASE_URL)
@@ -55,15 +55,15 @@ def init_db():
     c = get_conn()
     try:
         c.run("""CREATE TABLE IF NOT EXISTS players (
-            tg_id BIGINT PRIMARY KEY,
-            username TEXT DEFAULT '',
-            first_name TEXT DEFAULT 'Игрок',
-            balance INTEGER DEFAULT 1000,
-            total_won INTEGER DEFAULT 0,
-            total_lost INTEGER DEFAULT 0,
+            tg_id        BIGINT PRIMARY KEY,
+            username     TEXT DEFAULT '',
+            first_name   TEXT DEFAULT 'Игрок',
+            balance      INTEGER DEFAULT 1000,
+            total_won    INTEGER DEFAULT 0,
+            total_lost   INTEGER DEFAULT 0,
             games_played INTEGER DEFAULT 0,
-            last_daily TIMESTAMP DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT NOW()
+            last_daily   TIMESTAMP DEFAULT NULL,
+            created_at   TIMESTAMP DEFAULT NOW()
         )""")
     finally:
         c.close()
@@ -96,6 +96,7 @@ def set_last_daily(tg_id):
 def get_top():
     return qall("SELECT first_name,balance,games_played FROM players ORDER BY balance DESC LIMIT 10")
 
+# ── FLASK ──
 app = Flask(__name__)
 
 @app.route("/health")
@@ -127,6 +128,7 @@ def api_top():
     rows = get_top() or []
     return jsonify([{"name":r[0],"balance":r[1],"games":r[2]} for r in rows])
 
+# ── BOT HANDLERS ──
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     ensure_player(u.id, u.username or "", u.first_name or "Игрок")
@@ -185,15 +187,35 @@ def run_flask():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
 def main():
-    if not BOT_TOKEN: log.error("BOT_TOKEN not set!"); return
-    if not DATABASE_URL: log.error("DATABASE_URL not set!"); return
+    global BOT_TOKEN, DATABASE_URL, ADMIN_ID, GAME_URL
+
+    # Читаем переменные строго здесь — с .strip() на случай лишних пробелов
+    BOT_TOKEN    = os.environ.get("BOT_TOKEN",    "").strip()
+    DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+    ADMIN_ID     = int(os.environ.get("ADMIN_ID", "0").strip())
+    GAME_URL     = os.environ.get("GAME_URL",     "").strip()
+
+    log.info(f"BOT_TOKEN set: {bool(BOT_TOKEN)}")
+    log.info(f"DATABASE_URL set: {bool(DATABASE_URL)}")
+    log.info(f"GAME_URL: {GAME_URL}")
+
+    if not BOT_TOKEN:
+        log.error("BOT_TOKEN not set! Проверь Variables в Railway.")
+        return
+    if not DATABASE_URL:
+        log.error("DATABASE_URL not set!")
+        return
+
     init_db()
+
     threading.Thread(target=run_flask, daemon=True).start()
     log.info("Flask started")
+
     application = Application.builder().token(BOT_TOKEN).build()
     for cmd, fn in [("start",cmd_start),("play",cmd_play),("balance",cmd_balance),
                     ("daily",cmd_daily),("top",cmd_top),("topup",cmd_topup)]:
         application.add_handler(CommandHandler(cmd, fn))
+
     log.info("Bot polling...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
