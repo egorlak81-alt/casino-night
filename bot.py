@@ -351,12 +351,13 @@ def main():
     if not BOT_TOKEN: log.error("BOT_TOKEN not set!"); return
     if not DATABASE_URL: log.error("DATABASE_URL not set!"); return
 
-    import asyncio, telegram
-    async def reset_bot():
-        bot = telegram.Bot(token=BOT_TOKEN)
-        await bot.delete_webhook(drop_pending_updates=True)
+    # Сбрасываем вебхук через простой HTTP запрос (без asyncio)
+    import requests as req_lib
+    try:
+        req_lib.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
         log.info("Webhook cleared")
-    asyncio.run(reset_bot())
+    except Exception as e:
+        log.warning(f"Webhook clear failed: {e}")
 
     init_db()
     threading.Thread(target=run_flask, daemon=True).start()
@@ -372,7 +373,7 @@ def main():
                     ("daily",cmd_daily),("top",cmd_top),("topup",cmd_topup)]:
         application.add_handler(CommandHandler(cmd, fn))
     log.info("Bot polling...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True, close_loop=False)
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
