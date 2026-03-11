@@ -292,8 +292,7 @@ if __name__=="__main__":
                     await bot_app.start()
                     await bot_app.updater.start_polling(
                         allowed_updates=Update.ALL_TYPES,
-                        drop_pending_updates=True,
-                        error_callback=lambda e: None
+                        drop_pending_updates=True
                     )
                     log.info("Bot polling started")
                     await asyncio.sleep(float('inf'))
@@ -308,5 +307,4 @@ if __name__=="__main__":
     port=int(os.environ.get("PORT",5000))
     log.info(f"Flask on port {port}")
     # Use threaded=True so Flask handles requests while bot runs
-    from waitress import serve
-    serve(app, host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
