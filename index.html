@@ -391,6 +391,9 @@ function rc(card,cls=''){
 
 // ── INIT ──
 window.addEventListener('load',()=>{
+  // Загружаем сохранённое имя
+  const savedName = localStorage.getItem('casinoName');
+  if(savedName){ $('pName').value=savedName; pName=savedName; }
   // Menu
   $('gcBj').addEventListener('click',()=>openGame('blackjack'));
   $('gcPk').addEventListener('click',()=>openGame('poker'));
@@ -433,6 +436,7 @@ window.addEventListener('load',()=>{
 
 function openGame(game){
   pName=$('pName').value.trim()||'Игрок';
+  localStorage.setItem('casinoName', pName);
   curGame=game;
   if(game==='blackjack'){ bjInit(); showScreen('blackjack'); return; }
   if(game==='dice'){ diNewGame(); showScreen('dice'); return; }
@@ -447,31 +451,49 @@ let peer=null,hConn=null,gConns=[],isHost=false,lbPlayers=[];
 
 function genCode(){ return Math.random().toString(36).slice(2,6).toUpperCase(); }
 
+const PEER_CONFIG={config:{iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'stun:stun1.l.google.com:19302'},
+  {urls:'stun:stun2.l.google.com:19302'},
+  {urls:'stun:stun.cloudflare.com:3478'}
+]},debug:0};
+
 function loadPeer(cb){
   if(typeof Peer!=='undefined'){ cb(); return; }
   const s=document.createElement('script');
-  s.src='https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js';
-  s.onload=cb; s.onerror=()=>toast('Нет интернета для мультиплеера');
+  s.src='https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
+  s.onload=cb;
+  s.onerror=()=>{
+    const s2=document.createElement('script');
+    s2.src='https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js';
+    s2.onload=cb; s2.onerror=()=>toast('Нет интернета');
+    document.head.appendChild(s2);
+  };
   document.head.appendChild(s);
 }
 
 function createRoom(){
   const code=genCode();
   $('rcDisp').textContent=code; $('rcBox').style.display='block'; $('waitBox').style.display='block';
+  $('wStat').textContent='Подключение...';
   isHost=true; lbPlayers=[{name:pName,id:'host'}]; renderLbPlayers();
-  if(peer){ try{peer.destroy()}catch(e){} }
+  if(peer){ try{peer.destroy()}catch(e){} peer=null; }
   loadPeer(()=>{
     try{
-      peer=new Peer('csn-'+code);
-      peer.on('open',()=>{ $('wStat').textContent='Ожидание...'; gConns=[]; });
+      peer=new Peer('csn-'+code, PEER_CONFIG);
+      peer.on('open',()=>{ $('wStat').textContent='Ожидание игроков...'; gConns=[]; toast('Код: '+code); });
       peer.on('connection',c=>{
-        gConns.push(c);
-        c.on('open',()=>c.send({type:'joined',players:lbPlayers.map(p=>p.name)}));
+        c.on('open',()=>{ gConns.push(c); c.send({type:'joined',players:lbPlayers.map(p=>p.name)}); });
         c.on('data',d=>onHost(c,d));
         c.on('close',()=>{ gConns=gConns.filter(x=>x!==c); lbPlayers=lbPlayers.filter(p=>p.id!==c.peer); renderLbPlayers(); bc({type:'pl',players:lbPlayers.map(p=>p.name)}); });
+        c.on('error',e=>console.log('conn err',e));
       });
-      peer.on('error',e=>toast('Ошибка: '+e.type));
-    }catch(e){ toast('Ошибка'); }
+      peer.on('error',e=>{
+        if(e.type==='unavailable-id'){ setTimeout(createRoom,500); }
+        else toast('Ошибка сети: '+e.type);
+      });
+      peer.on('disconnected',()=>{ try{peer.reconnect();}catch(e){} });
+    }catch(e){ toast('Ошибка: '+e.message); }
   });
 }
 
@@ -479,18 +501,25 @@ function joinRoom(){
   const code=$('codeIn').value.trim().toUpperCase();
   if(code.length<4){ toast('Введите 4 символа'); return; }
   isHost=false;
-  if(peer){ try{peer.destroy()}catch(e){} }
+  $('waitBox').style.display='block'; $('wStat').textContent='Подключение...';
+  if(peer){ try{peer.destroy()}catch(e){} peer=null; }
   loadPeer(()=>{
     try{
-      peer=new Peer();
+      peer=new Peer(undefined, PEER_CONFIG);
       peer.on('open',()=>{
-        hConn=peer.connect('csn-'+code);
-        hConn.on('open',()=>{ hConn.send({type:'hello',name:pName}); $('waitBox').style.display='block'; $('wStat').textContent='Подключение...'; });
-        hConn.on('data',d=>onClient(d));
-        hConn.on('close',()=>toast('Соединение разорвано'));
+        const c=peer.connect('csn-'+code,{reliable:true});
+        hConn=c;
+        c.on('open',()=>{ c.send({type:'hello',name:pName}); $('wStat').textContent='Ожидание хоста...'; });
+        c.on('data',d=>onClient(d));
+        c.on('close',()=>toast('Соединение разорвано'));
+        c.on('error',()=>toast('Ошибка соединения'));
+        setTimeout(()=>{ if(!c.open) toast('Комната не найдена'); },8000);
       });
-      peer.on('error',()=>toast('Комната не найдена'));
-    }catch(e){ toast('Ошибка'); }
+      peer.on('error',e=>{
+        if(e.type==='peer-unavailable') toast('Комната '+code+' не найдена');
+        else toast('Ошибка: '+e.type);
+      });
+    }catch(e){ toast('Ошибка: '+e.message); }
   });
 }
 
