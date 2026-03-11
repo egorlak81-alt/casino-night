@@ -441,7 +441,7 @@ function openGame(game){
   if(game==='blackjack'){ bjInit(); showScreen('blackjack'); return; }
   if(game==='dice'){ diNewGame(); showScreen('dice'); return; }
   $('lbGame').textContent={poker:'Покер',durak:'Дурак'}[game]||game;
-  $('rcBox').style.display='none'; $('waitBox').style.display='none';
+  $('rcBox').style.display='none'; $('waitBox').style.display='none'; $('wStat').style.color=''; $('wStat').textContent='Ожидание...';
   $('btnStart').style.display='none'; $('codeIn').value='';
   showScreen('lobby');
 }
@@ -481,7 +481,12 @@ function createRoom(){
   loadPeer(()=>{
     try{
       peer=new Peer('csn-'+code, PEER_CONFIG);
-      peer.on('open',()=>{ $('wStat').textContent='Ожидание игроков...'; gConns=[]; toast('Код: '+code); });
+      peer.on('open',()=>{
+        $('wStat').innerHTML='✅ <b>Комната готова!</b> Код: <b>'+code+'</b>';
+        $('wStat').style.color='#44cc77';
+        gConns=[];
+        toast('✅ Комната создана! Код: '+code, 3000);
+      });
       peer.on('connection',c=>{
         c.on('open',()=>{ gConns.push(c); c.send({type:'joined',players:lbPlayers.map(p=>p.name)}); });
         c.on('data',d=>onHost(c,d));
@@ -490,7 +495,11 @@ function createRoom(){
       });
       peer.on('error',e=>{
         if(e.type==='unavailable-id'){ setTimeout(createRoom,500); }
-        else toast('Ошибка сети: '+e.type);
+        else {
+          $('wStat').innerHTML='❌ Не удалось создать комнату ('+e.type+')';
+          $('wStat').style.color='#cc4444';
+          toast('❌ Ошибка: '+e.type, 3000);
+        }
       });
       peer.on('disconnected',()=>{ try{peer.reconnect();}catch(e){} });
     }catch(e){ toast('Ошибка: '+e.message); }
@@ -509,15 +518,32 @@ function joinRoom(){
       peer.on('open',()=>{
         const c=peer.connect('csn-'+code,{reliable:true});
         hConn=c;
-        c.on('open',()=>{ c.send({type:'hello',name:pName}); $('wStat').textContent='Ожидание хоста...'; });
+        c.on('open',()=>{
+          c.send({type:'hello',name:pName});
+          $('wStat').innerHTML='✅ <b>Подключено!</b> Ожидание хоста...';
+          $('wStat').style.color='#44cc77';
+        });
         c.on('data',d=>onClient(d));
         c.on('close',()=>toast('Соединение разорвано'));
         c.on('error',()=>toast('Ошибка соединения'));
-        setTimeout(()=>{ if(!c.open) toast('Комната не найдена'); },8000);
+        setTimeout(()=>{
+          if(!c.open){
+            $('wStat').innerHTML='❌ Не удалось подключиться';
+            $('wStat').style.color='#cc4444';
+            toast('❌ Комната не найдена', 3000);
+          }
+        },8000);
       });
       peer.on('error',e=>{
-        if(e.type==='peer-unavailable') toast('Комната '+code+' не найдена');
-        else toast('Ошибка: '+e.type);
+        if(e.type==='peer-unavailable'){
+          $('wStat').innerHTML='❌ Комната <b>'+code+'</b> не найдена';
+          $('wStat').style.color='#cc4444';
+          toast('❌ Комната не найдена', 3000);
+        } else {
+          $('wStat').innerHTML='❌ Ошибка подключения: '+e.type;
+          $('wStat').style.color='#cc4444';
+          toast('❌ Ошибка: '+e.type, 3000);
+        }
       });
     }catch(e){ toast('Ошибка: '+e.message); }
   });

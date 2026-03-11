@@ -212,12 +212,24 @@ def main():
     log.info("Flask started")
 
     application = Application.builder().token(BOT_TOKEN).build()
+    async def error_handler(update, context):
+        err = str(context.error)
+        if 'Conflict' in err:
+            log.warning("Conflict: another bot instance detected, retrying...")
+        else:
+            log.error(f"Error: {err}")
+    application.add_error_handler(error_handler)
+
     for cmd, fn in [("start",cmd_start),("play",cmd_play),("balance",cmd_balance),
                     ("daily",cmd_daily),("top",cmd_top),("topup",cmd_topup)]:
         application.add_handler(CommandHandler(cmd, fn))
 
     log.info("Bot polling...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        close_loop=False
+    )
 
 if __name__ == "__main__":
     main()
