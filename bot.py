@@ -299,8 +299,35 @@ async def cmd_topup(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(args)<2: await update.message.reply_text("/topup <tg_id> <сумма>"); return
     await update.message.reply_text(f"✅ Баланс: ${add_balance(int(args[0]),int(args[1]))}")
 
-def run_flask():
-    app.run(host="0.0.0.0",port=int(os.environ.get("PORT",5000)))
+def run_bot():
+    import asyncio
+    global BOT_TOKEN
+    async def start_bot():
+        import requests as req_lib
+        try:
+            req_lib.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true",timeout=10)
+            log.info("Webhook cleared")
+        except Exception as e:
+            log.warning(f"Webhook clear failed: {e}")
+
+        application=Application.builder().token(BOT_TOKEN).build()
+        async def error_handler(update,context):
+            err=str(context.error)
+            if 'Conflict' in err: log.warning("Conflict: another instance")
+            else: log.error(f"Error: {err}")
+        application.add_error_handler(error_handler)
+        for cmd,fn in [("start",cmd_start),("play",cmd_play),("balance",cmd_balance),
+                       ("daily",cmd_daily),("top",cmd_top),("topup",cmd_topup)]:
+            application.add_handler(CommandHandler(cmd,fn))
+        log.info("Bot polling...")
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        # keep running
+        while True:
+            await asyncio.sleep(3600)
+
+    asyncio.run(start_bot())
 
 def main():
     global BOT_TOKEN,DATABASE_URL,ADMIN_ID,GAME_URL
@@ -312,28 +339,17 @@ def main():
     if not BOT_TOKEN: log.error("BOT_TOKEN not set!"); return
     if not DATABASE_URL: log.error("DATABASE_URL not set!"); return
 
-    import requests as req_lib
-    try:
-        req_lib.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true",timeout=10)
-        log.info("Webhook cleared")
-    except Exception as e:
-        log.warning(f"Webhook clear failed: {e}")
-
     init_db()
-    threading.Thread(target=run_flask,daemon=True).start()
-    log.info("Flask started")
 
-    application=Application.builder().token(BOT_TOKEN).build()
-    async def error_handler(update,context):
-        err=str(context.error)
-        if 'Conflict' in err: log.warning("Conflict: another instance")
-        else: log.error(f"Error: {err}")
-    application.add_error_handler(error_handler)
-    for cmd,fn in [("start",cmd_start),("play",cmd_play),("balance",cmd_balance),
-                   ("daily",cmd_daily),("top",cmd_top),("topup",cmd_topup)]:
-        application.add_handler(CommandHandler(cmd,fn))
-    log.info("Bot polling...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES,drop_pending_updates=True)
+    # Bot runs in background thread
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    log.info("Bot thread started")
+
+    # Flask runs as MAIN process — Railway connects to it
+    port = int(os.environ.get("PORT", 5000))
+    log.info(f"Flask starting on port {port}")
+    app.run(host="0.0.0.0", port=port, threaded=True)
 
 if __name__=="__main__":
     main()
