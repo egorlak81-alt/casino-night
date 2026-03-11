@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 
 import pg8000.native
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -125,13 +126,7 @@ def _cleanup_room(r):
 
 # ── FLASK ──
 app = Flask(__name__)
-
-@app.after_request
-def cors(resp):
-    resp.headers['Access-Control-Allow-Origin'] = '*'
-    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-    resp.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
-    return resp
+CORS(app)
 
 @app.route("/health")
 def health(): return "ok"
