@@ -203,9 +203,11 @@ def api_me():
     tg_id = request.args.get("tg_id", type=int)
     if not tg_id: return jsonify({"error": "no tg_id"}), 400
     row = get_player(tg_id)
-    if not row or not row[1]:
+    if not row:
         return jsonify({"exists": False}), 200
-    return jsonify({"exists": True, "tg_id": row[0], "nickname": row[1],
+    # Если ник пустой — сгенерировать из tg_id чтобы не блокировать вход
+    nick = row[1] if row[1] else f"player{tg_id % 10000}"
+    return jsonify({"exists": True, "tg_id": row[0], "nickname": nick,
                     "balance": row[2], "total_won": row[3],
                     "total_lost": row[4], "games_played": row[5]})
 
@@ -516,6 +518,45 @@ async def handle_any(update: Update, ctx: ContextTypes.DEFAULT_TYPE, from_start=
         f"✏️ Введи желаемый ник (2–16 символов, только буквы/цифры):",
         parse_mode="Markdown")
 
+
+async def cmd_setnick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    u = update.effective_user
+    if not u: return
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Использование: /setnick ТвойНик\nПример: /setnick Lucky777")
+        return
+    import re
+    nick = args[0].strip()
+    if not re.match(r'^[a-zA-Zа-яА-ЯёЁ0-9_\-\.]{2,16}$', nick):
+        await update.message.reply_text("❌ Ник: 2–16 символов, только буквы/цифры/_ - .")
+        return
+    existing = qone("SELECT tg_id FROM players WHERE LOWER(nickname)=LOWER(%s)", (nick,))
+    if existing and existing[0] != u.id:
+        await update.message.reply_text("❌ Этот ник уже занят.")
+        return
+    row = get_player(u.id)
+    if row:
+        qexec("UPDATE players SET nickname=%s WHERE tg_id=%s", (nick, u.id))
+    else:
+        create_player(u.id, u.username or '', nick)
+    await update.message.reply_text(f"✅ Ник установлен: *{nick}*\nОткрой казино: /play", parse_mode="Markdown")
+
+async def cmd_addbal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    u = update.effective_user
+    if not u or str(u.id) != str(ADMIN_ID):
+        await update.message.reply_text("⛔ Только для администратора"); return
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text("Использование: /addbal <tg_id> <сумма>"); return
+    try: tid=int(args[0]); amount=int(args[1])
+    except: await update.message.reply_text("❌ Неверный формат"); return
+    row = get_player(tid)
+    if not row: await update.message.reply_text("❌ Игрок не найден"); return
+    new_bal = row[2]+amount
+    qexec("UPDATE players SET balance=%s WHERE tg_id=%s",(new_bal,tid))
+    await update.message.reply_text(f"✅ {row[1] or tid}: {row[2]} → {new_bal}")
+
 # ════════════════════════════════
 # ── STARTUP ──
 # ════════════════════════════════
@@ -536,6 +577,8 @@ def setup():
     tg_app.add_handler(CommandHandler("balance", cmd_balance))
     tg_app.add_handler(CommandHandler("daily",   cmd_daily))
     tg_app.add_handler(CommandHandler("top",     cmd_top))
+    tg_app.add_handler(CommandHandler("setnick", cmd_setnick))
+    tg_app.add_handler(CommandHandler("addbal",  cmd_addbal))
     # Любое текстовое сообщение (не команда) → регистрация
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_any))
 
