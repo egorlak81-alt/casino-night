@@ -348,9 +348,13 @@ def api_rooms_action():
 
 BOT_USERNAME = ""  # заполним при старте
 
-def play_kb():
+def play_kb(tg_id=None):
     if not GAME_URL: return None
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🎰 Играть", web_app=WebAppInfo(url=GAME_URL))]])
+    url = GAME_URL
+    if tg_id:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}tg_id={tg_id}"
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🎰 Играть", web_app=WebAppInfo(url=url))]])
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
@@ -362,7 +366,7 @@ async def cmd_play(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ Ты ещё не зарегистрирован!\n\nОтправь мне любое сообщение чтобы выбрать ник.")
         return
-    kb = play_kb()
+    kb = play_kb(u.id)
     await update.message.reply_text("🎰 Открывай!", reply_markup=kb)
 
 async def cmd_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -451,7 +455,7 @@ async def handle_any(update: Update, ctx: ContextTypes.DEFAULT_TYPE, from_start=
         clear_pending(u.id)
         bal = get_balance(u.id)
         log.info(f"[REG] tg_id={u.id} nick={nick} balance={bal}")
-        kb = play_kb()
+        kb = play_kb(u.id)
         await update.message.reply_text(
             f"✅ *Добро пожаловать в Casino Night, {nick}!*\n\n"
             f"💰 Стартовый баланс: *$1000*\n\n"

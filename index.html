@@ -575,30 +575,49 @@ window.addEventListener('load', async ()=>{
   showScreen('loading');
   setLoading('Подключение к Telegram...');
 
-  // Шаг 1: получить Telegram WebApp контекст
-  const tg=window.Telegram?.WebApp;
-  if(tg){
-    tg.ready();
-    try{ tg.expand(); }catch(e){}
-    await new Promise(res=>setTimeout(res,500));
-    const u=tg.initDataUnsafe?.user;
-    if(u?.id){
-      myTgId=u.id;
-      console.log('[INIT] tg_id='+myTgId);
-    } else {
-      console.warn('[INIT] No user in initDataUnsafe:', JSON.stringify(tg.initDataUnsafe));
+  // Шаг 1: получить tg_id всеми доступными способами
+  // Способ А: из URL параметра ?tg_id=X (самый надёжный — бот сам вставляет)
+  const urlParams = new URLSearchParams(location.search);
+  const urlTgId = parseInt(urlParams.get('tg_id') || '0');
+  if(urlTgId){ myTgId=urlTgId; console.log('[INIT] tg_id from URL:', myTgId); }
+
+  // Способ Б: из Telegram WebApp initDataUnsafe (резервный)
+  if(!myTgId){
+    const tg=window.Telegram?.WebApp;
+    if(tg){
+      tg.ready();
+      try{ tg.expand(); }catch(e){}
+      await new Promise(res=>setTimeout(res,600));
+      const u=tg.initDataUnsafe?.user;
+      if(u?.id){ myTgId=u.id; console.log('[INIT] tg_id from WebApp:', myTgId); }
+      else { console.warn('[INIT] initDataUnsafe.user=', JSON.stringify(tg.initDataUnsafe)); }
     }
+  }
+
+  // Способ В: из initData строки (парсим вручную)
+  if(!myTgId){
+    try{
+      const tg=window.Telegram?.WebApp;
+      const raw=tg?.initData||'';
+      if(raw){
+        const pairs=raw.split('&');
+        for(const pair of pairs){
+          if(pair.startsWith('user=')){
+            const user=JSON.parse(decodeURIComponent(pair.slice(5)));
+            if(user?.id){ myTgId=user.id; console.log('[INIT] tg_id from initData parse:', myTgId); break; }
+          }
+        }
+      }
+    }catch(e){ console.warn('[INIT] initData parse error:', e); }
   }
 
   // Шаг 2: если нет tg_id — заблокировать
   if(!myTgId){
-    // DEV режим только на localhost
     if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){
       myTgId=999999999;
-      console.warn('[DEV] fake tg_id=999999999');
+      console.warn('[DEV] fake tg_id');
     } else {
-      // Показать экран блокировки
-      _showBlocked('❌ Открой приложение через Telegram бота');
+      _showBlocked('');
       return;
     }
   }
@@ -636,20 +655,15 @@ window.addEventListener('load', async ()=>{
 });
 
 // Показать экран блокировки с нужным username бота
-function _showBlocked(customMsg){
-  // Попробовать получить username бота с сервера
+function _showBlocked(msg){
+  // Получить username бота ОДИН РАЗ
   fetch(SERVER+'/api/botinfo').then(r=>r.json()).then(d=>{
-    const username=d.username||'';
-    if(username && $('botLink')){
-      $('botLink').href='https://t.me/'+username;
+    if(d.username && $('botLink')){
+      $('botLink').href='https://t.me/'+d.username;
+      $('botLink').textContent='✈️ @'+d.username;
     }
   }).catch(()=>{});
-  if(customMsg && $('loadingMsg')){
-    setLoading(customMsg);
-    setTimeout(()=>showScreen('regScreen'), 1200);
-  } else {
-    showScreen('regScreen');
-  }
+  showScreen('regScreen');
 }
 
 let _buttonsInited=false;
