@@ -376,7 +376,6 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
 
 <script>
 'use strict';
-// ── UTILS ──
 const $ = id => document.getElementById(id);
 const SUITS=['♠','♥','♦','♣'], RANKS=['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
 let curGame=null, pName='Игрок';
@@ -385,7 +384,7 @@ function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
   $(id).classList.remove('hidden');
 }
-function toast(msg,dur=2200){
+function toast(msg,dur=2500){
   const t=$('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),dur);
 }
@@ -406,17 +405,70 @@ function rc(card,cls=''){
 }
 
 // ── SERVER ──
-const SERVER = 'https://casino-night-production.up.railway.app';
+const SERVER='https://casino-night-production.up.railway.app';
+
+// ── BALANCE ──
+let tgUser=null, myBalance=1000;
+
+async function initServer(){
+  const tg=window.Telegram?.WebApp;
+  if(!tg) return;
+  tg.ready();
+  tgUser=tg.initDataUnsafe?.user;
+  if(!tgUser) return;
+  try{
+    const res=await fetch(SERVER+'/api/register',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tg_id:tgUser.id,username:tgUser.username||'',first_name:tgUser.first_name||'Игрок'})});
+    const data=await res.json();
+    myBalance=data.balance; bjBal=data.balance;
+    updateBalanceUI();
+    if($('pName')&&!$('pName').value){$('pName').value=tgUser.first_name||'Игрок';pName=tgUser.first_name||'Игрок';}
+    toast('💰 Баланс: $'+myBalance);
+  }catch(e){console.log('server offline');}
+}
+
+function updateBalanceUI(){
+  if($('bjBal'))$('bjBal').textContent=myBalance;
+  if($('bjTot'))$('bjTot').textContent=myBalance;
+  if($('balDisplay'))$('balDisplay').textContent='$'+myBalance;
+}
+
+async function syncBalance(delta){
+  // delta>0 = win, delta<0 = loss
+  if(!tgUser) {
+    myBalance=Math.max(0,myBalance+delta);
+    updateBalanceUI(); return myBalance;
+  }
+  try{
+    const res=await fetch(SERVER+'/api/update',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tg_id:tgUser.id, delta})});
+    const data=await res.json();
+    myBalance=data.balance; bjBal=data.balance;
+    updateBalanceUI(); return myBalance;
+  }catch(e){
+    myBalance=Math.max(0,myBalance+delta);
+    updateBalanceUI(); return myBalance;
+  }
+}
+
+async function refreshBalance(){
+  if(!tgUser) return;
+  try{
+    const res=await fetch(`${SERVER}/api/balance?tg_id=${tgUser.id}`);
+    const data=await res.json();
+    myBalance=data.balance; bjBal=data.balance;
+    updateBalanceUI();
+  }catch(e){}
+}
 
 // ── ROOM STATE ──
 let curRoomId=null, myUid=null, isHost=false, lbPlayers=[];
-let pollTimer=null, lastMsgSeq=0, lastActSeq=0, gameStarted=false, cdInterval=null;
+let pollTimer=null, lastMsgSeq=0, lastActSeq=0, gameStarted=false;
+let curBuyin=0, curBlind=10, curStake='small';
 
 function getUid(){
   if(myUid) return myUid;
-  if(window.Telegram?.WebApp?.initDataUnsafe?.user?.id){
-    myUid=String(window.Telegram.WebApp.initDataUnsafe.user.id); return myUid;
-  }
+  if(tgUser?.id){ myUid=String(tgUser.id); return myUid; }
   let id=localStorage.getItem('casino_uid');
   if(!id){id='u'+Date.now()+Math.floor(Math.random()*9999);localStorage.setItem('casino_uid',id);}
   myUid=id; return myUid;
@@ -436,8 +488,8 @@ function sh(data){
 
 // ── INIT ──
 window.addEventListener('load',()=>{
-  const savedName=localStorage.getItem('casinoName');
-  if(savedName){$('pName').value=savedName;pName=savedName;}
+  const sn=localStorage.getItem('casinoName');
+  if(sn){$('pName').value=sn;pName=sn;}
   $('gcBj').addEventListener('click',()=>openGame('blackjack'));
   $('gcPk').addEventListener('click',()=>openGame('poker'));
   $('gcDi').addEventListener('click',()=>openGame('dice'));
@@ -452,8 +504,7 @@ window.addEventListener('load',()=>{
     $('wov').classList.add('hidden');
     if(curGame==='blackjack')bjReset();
     else if(curGame==='dice')diNewGame();
-    else if(curGame==='durak'&&isHost)dkInit();
-    else if(curGame==='poker'&&isHost)pkInit();
+    else{leaveRoom();showScreen('rooms');loadRooms();}
   });
   $('wMenu').addEventListener('click',()=>{$('wov').classList.add('hidden');leaveRoom();showScreen('menu');});
   $('c5').addEventListener('click',()=>bjBet(5));$('c10').addEventListener('click',()=>bjBet(10));
@@ -471,19 +522,20 @@ window.addEventListener('load',()=>{
   $('dkTake').addEventListener('click',dkTake);
   $('dkPass').addEventListener('click',dkPass);
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+  initServer();
 });
 
 function openGame(game){
   pName=$('pName').value.trim()||'Игрок';
   localStorage.setItem('casinoName',pName);
   curGame=game;
-  if(game==='blackjack'){bjInit();showScreen('blackjack');return;}
+  if(game==='blackjack'){bjBal=myBalance;bjInit();showScreen('blackjack');return;}
   if(game==='dice'){diNewGame();showScreen('dice');return;}
   $('roomsTitle').textContent=game==='poker'?'🃏 Покер':'🂮 Дурак';
-  showScreen('rooms'); loadRooms();
+  showScreen('rooms');loadRooms();
 }
 
-// ── ROOMS ──
+// ── ROOMS LIST ──
 async function loadRooms(){
   $('roomsList').innerHTML='<div class="stxt">Загрузка столов...</div>';
   try{
@@ -495,21 +547,30 @@ async function loadRooms(){
 
 function renderRoomsList(rooms){
   const icon=curGame==='poker'?'🃏':'🂮';
+  const stakeColors={'small':'#44cc77','medium':'#ddaa22','big':'#cc4444'};
   $('roomsList').innerHTML=rooms.map(r=>{
     const isFull=r.players>=r.max&&!r.started;
     const isPlaying=r.started;
+    const canAfford=myBalance>=r.buyin;
     let status='',cls='';
     if(isPlaying){status='🟡 Идёт игра';cls='playing';}
     else if(isFull){status='🔴 Стол заполнен';cls='full';}
+    else if(!canAfford){status=`⚠️ Нужно $${r.buyin}`;cls='full';}
     else if(r.countdown>0){status=`⏳ Старт через ${r.countdown}с`;}
     else if(r.players===0){status='🟢 Свободно';}
     else{status=`🟢 ${r.players} игр. — ждут`;}
     const dots=Array.from({length:r.max},(_,i)=>`<div class="rdot${i<r.players?' on':''}"></div>`).join('');
-    const clickFn=(isFull||isPlaying)?`toast('${status}')`:`joinServerRoom('${r.id}')`;
+    const clickable=!isFull&&!isPlaying&&canAfford;
+    const clickFn=clickable?`joinServerRoom('${r.id}')`:`toast('${status}')`;
+    const col=stakeColors[r.stake]||'#888';
     return `<div class="room-card${cls?' '+cls:''}" onclick="${clickFn}">
       <div class="room-icon">${icon}</div>
-      <div class="room-info"><div class="room-name">${r.name}</div><div class="room-status">${status}</div></div>
-      <div class="room-count"><div>${r.players}/${r.max}</div><div class="room-dots">${dots}</div></div>
+      <div class="room-info">
+        <div class="room-name">${r.name}</div>
+        <div class="room-status">${status}</div>
+        <div style="font-size:11px;color:${col};margin-top:2px">💰 Вход: $${r.buyin}${curGame==='poker'?' · Блайнд: $'+r.blind:''}</div>
+      </div>
+      <div class="room-count"><div style="font-size:13px;color:${canAfford?'var(--gold)':'#cc4444'}">${r.players}/${r.max}</div><div class="room-dots">${dots}</div></div>
     </div>`;
   }).join('')+`<button class="btn btn-b" style="margin-top:4px" onclick="loadRooms()">🔄 Обновить</button>`;
 }
@@ -517,15 +578,19 @@ function renderRoomsList(rooms){
 async function joinServerRoom(roomId){
   $('roomsList').innerHTML='<div class="stxt">Подключение...</div>';
   try{
-    const resp=await fetch(`${SERVER}/api/rooms/join`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({room_id:roomId,uid:getUid(),name:pName})});
+    const body={room_id:roomId,uid:getUid(),name:pName};
+    if(tgUser) body.tg_id=String(tgUser.id);
+    const resp=await fetch(`${SERVER}/api/rooms/join`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const data=await resp.json();
     if(data.error){toast('❌ '+data.error);loadRooms();return;}
     curRoomId=roomId; isHost=data.is_host; gameStarted=false;
+    curBuyin=data.buyin||0; curBlind=data.blind||10; curStake=data.stake||'small';
     lastMsgSeq=data.msg_seq||0; lastActSeq=data.act_seq||0;
     lbPlayers=data.players.map(n=>({name:n}));
     $('lbGame').textContent=curGame==='poker'?'🃏 Покер':'🂮 Дурак';
-    $('lbTitle').textContent=roomId.startsWith('poker')?'Покер · Стол '+roomId.split('_')[1]:'Дурак · Стол '+roomId.split('_')[1];
+    $('lbTitle').textContent=data.players.length?roomId.replace('_',' · Стол '):roomId;
+    const stakeLabels={'small':'🟢 Малые ставки','medium':'🟡 Средние ставки','big':'🔴 Большие ставки'};
+    $('wStat').textContent=`${stakeLabels[curStake]||''} · Вход $${curBuyin}`;
     renderLbPlayers(); updateCdDisplay(data.countdown);
     showScreen('lobby'); startPolling();
   }catch(e){toast('❌ Ошибка соединения');loadRooms();}
@@ -533,21 +598,21 @@ async function joinServerRoom(roomId){
 
 async function leaveRoom(){
   stopPolling();
-  if(!curRoomId) return;
+  if(!curRoomId)return;
   const rid=curRoomId; curRoomId=null; gameStarted=false;
   try{await fetch(`${SERVER}/api/rooms/leave`,{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({room_id:rid,uid:getUid()})});}catch(e){}
 }
 
 function startPolling(){stopPolling();pollTimer=setInterval(doPoll,2000);doPoll();}
-function stopPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}if(cdInterval){clearInterval(cdInterval);cdInterval=null;}}
+function stopPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}
 
 async function doPoll(){
-  if(!curRoomId) return;
+  if(!curRoomId)return;
   try{
     const url=`${SERVER}/api/rooms/poll?room_id=${curRoomId}&uid=${getUid()}&since_msg=${lastMsgSeq}&since_act=${lastActSeq}&is_host=${isHost?1:0}`;
-    const resp=await fetch(url); const data=await resp.json();
-    if(data.error) return;
+    const resp=await fetch(url);const data=await resp.json();
+    if(data.error)return;
     if(data.host_id===getUid()&&!isHost) isHost=true;
     lbPlayers=data.players.map(n=>({name:n}));
     renderLbPlayers(); updateCdDisplay(data.countdown);
@@ -570,45 +635,53 @@ async function doPoll(){
 }
 
 function updateCdDisplay(cd){
-  if(cd===null||cd===undefined){$('cdTimer').textContent='—';$('wStat').textContent='Ожидание второго игрока...';}
-  else if(cd===0){$('cdTimer').textContent='🎮';$('wStat').textContent='Запуск игры!';}
-  else{$('cdTimer').textContent=cd+'с';$('wStat').textContent='✅ За столом игроки!';}
+  if(!$('cdTimer'))return;
+  if(cd===null||cd===undefined){$('cdTimer').textContent='—';}
+  else if(cd===0){$('cdTimer').textContent='🎮';}
+  else{$('cdTimer').textContent=cd+'с';}
 }
 
 function hostStart(){if(curGame==='poker')pkInit();if(curGame==='durak')dkInit();}
-
-function onHost(d){
-  if(!d) return;
-  if(d.type==='ga'){if(curGame==='poker')pkProc(d);if(curGame==='durak')dkProc(d);}
-}
+function onHost(d){if(!d)return;if(d.type==='ga'){if(curGame==='poker')pkProc(d);if(curGame==='durak')dkProc(d);}}
 function onClient(d){
-  if(!d) return;
+  if(!d)return;
   if(d.type==='pl'){lbPlayers=d.players.map(n=>({name:n}));renderLbPlayers();}
-  if(d.type==='gs'){
-    if(curGame==='poker'){pkRecvState(d.s);}
-    if(curGame==='durak'){dkRecvState(d.s);}
-  }
-  if(d.type==='start'){
-    if(d.game==='poker') pkClientStart(d);
-    if(d.game==='durak') dkClientStart(d);
-  }
+  if(d.type==='gs'){if(curGame==='poker')pkRecvState(d.s);if(curGame==='durak')dkRecvState(d.s);}
+  if(d.type==='start'){if(d.game==='poker')pkClientStart(d);if(d.game==='durak')dkClientStart(d);}
+  if(d.type==='win'){handleWinPayout(d);}
 }
 
 function renderLbPlayers(){
-  const el=$('pList'); if(!el) return;
+  const el=$('pList');if(!el)return;
   el.innerHTML=lbPlayers.map((p,i)=>`<div class="prow"><div class="pdot"></div><span>${p.name}${i===0?' 👑':''}</span></div>`).join('');
+}
+
+// ── WIN PAYOUT ──
+async function handleWinPayout(d){
+  // d = {type:'win', winner:name, pot:amount, loser:name}
+  const isWinner=d.winner===pName;
+  const isLoser=d.loser===pName||(d.losers&&d.losers.includes(pName));
+  if(isWinner){
+    const gained=d.pot-(curBuyin); // net gain
+    await syncBalance(d.pot); // add full pot (buyin already deducted at join)
+    toast(`🏆 Победа! +$${d.pot}`);
+  } else if(isLoser||d.allLose){
+    // buyin already virtually held — notify loss
+    toast(`😔 Проигрыш -$${curBuyin}`);
+  }
+  await refreshBalance();
 }
 
 // ── BLACKJACK ──
 let bjD=[],bjP=[],bjDl=[],bjB=0,bjBal=1000,bjOn=false;
-function bjInit(){bjBal=1000;bjB=0;bjOn=false;bjD=makeDeck(4);bjResetUI();}
+function bjInit(){bjBal=myBalance;bjB=0;bjOn=false;bjD=makeDeck(4);bjResetUI();}
 function bjResetUI(){
   $('bjBal').textContent=bjBal;$('bjTot').textContent=bjBal;$('bjBet').textContent=bjB;$('bjBD').textContent='$'+bjB;
   $('bjDC').innerHTML='';$('bjPC').innerHTML='';$('bjDS').textContent='';$('bjPS').textContent='';
   $('bjSt').textContent='Сделайте ставку и нажмите «Сдать»';
   $('bjDeal').disabled=false;$('bjHit').disabled=true;$('bjStand').disabled=true;$('bjDbl').disabled=true;
 }
-function bjReset(){bjB=0;bjOn=false;bjResetUI();}
+function bjReset(){bjB=0;bjOn=false;bjBal=myBalance;bjResetUI();}
 function bjUB(){$('bjBal').textContent=bjBal;$('bjTot').textContent=bjBal;$('bjBet').textContent=bjB;$('bjBD').textContent='$'+bjB;}
 function bjBet(n){if(bjOn)return;if(bjB+n>bjBal){toast('Недостаточно средств');return;}bjB+=n;bjUB();}
 function bjClear(){if(!bjOn){bjB=0;bjUB();}}
@@ -640,15 +713,17 @@ function bjStand(){
 }
 function bjDouble(){if(bjBal<bjB)return;bjBal-=bjB;bjB*=2;bjUB();bjP.push(bjD.pop());bjRendC(true);if(bjSc(bjP)>21)bjEnd('bust');else bjStand();}
 function bjEnd(res){
-  bjOn=false;let win=0,msg='';
-  if(res==='bust')msg='💥 Перебор!';
-  else if(res==='dBust'){msg='🎉 Дилер перебрал!';win=bjB*2;}
-  else if(res==='win'){msg='✅ Победа!';win=bjB*2;}
-  else if(res==='push'){msg='🤝 Ничья';win=bjB;}
-  else msg='❌ Дилер победил';
-  bjBal+=win;bjUB();$('bjSt').textContent=msg;$('bjDeal').disabled=false;
-  if(win>bjB)setTimeout(()=>toast('+$'+(win-bjB)+' 🎉'),300);
-  if(bjBal<=0)setTimeout(()=>{showWinner('😢','Банкрот!','Все деньги потрачены');bjBal=1000;bjUB();},800);
+  bjOn=false;let delta=0,msg='';
+  if(res==='bust'){msg='💥 Перебор!';delta=-bjB;}
+  else if(res==='dBust'){msg='🎉 Дилер перебрал!';bjBal+=bjB*2;delta=bjB;}
+  else if(res==='win'){msg='✅ Победа!';bjBal+=bjB*2;delta=bjB;}
+  else if(res==='push'){msg='🤝 Ничья';bjBal+=bjB;delta=0;}
+  else{msg='❌ Дилер победил';delta=-bjB;}
+  bjUB();$('bjSt').textContent=msg;$('bjDeal').disabled=false;
+  // Sync balance with server
+  if(delta!==0) syncBalance(delta);
+  if(delta>0) setTimeout(()=>toast('+$'+delta+' 🎉'),300);
+  if(bjBal<=0) setTimeout(()=>{toast('😢 Банкрот! Получи бонус /daily в боте');bjBal=0;bjUB();},800);
 }
 
 // ── DICE ──
@@ -663,7 +738,7 @@ function diRend(){
     d.addEventListener('click',()=>{if(diS.left<3){diS.held[i]=!diS.held[i];diRend();}});
     area.appendChild(d);});
   const co=diCombo(diS.dice);$('diCombo').textContent=co?'✨ '+co:'';
-  $('diHint').textContent=diS.left===3?'Нажмите «Бросить»':'Нажмите на кости чтобы оставить';
+  $('diHint').textContent=diS.left===3?'Нажмите «Бросить»':'Нажмите кости чтобы оставить';
   $('diScore').innerHTML=`<div class="dscore ap"><div class="dpn">${pName}</div><div class="dpt">${diS.score}</div><div class="dptl">очков</div></div>`;
   $('diRoll').textContent='🎲 Бросить ('+diS.left+')';$('diRoll').disabled=diS.left===0;
 }
@@ -685,69 +760,71 @@ function diCombo(d){const c=Array(7).fill(0);d.forEach(v=>c[v]++);const m=Math.m
   if(m===3)return 'Тройка';if(c.slice(1).filter(v=>v===2).length===2)return 'Две пары';if(m===2)return 'Пара';return '';}
 
 // ══════════════════════════════════════════════
-// ── POKER ENGINE (Texas Hold'em) ──
+// ── POKER ENGINE ──
 // ══════════════════════════════════════════════
-let pkSt=null, myPkI=0, myPkHand=[];
+let pkSt=null,myPkI=0,myPkHand=[];
+let pkGameOver=false;
 
 function pkInit(){
-  const players=lbPlayers.map(p=>({name:p.name,chips:1000,hand:[],bet:0,folded:false,allIn:false,acted:false}));
+  const n=lbPlayers.length;
+  const stk=curBuyin||500;
+  const blind=curBlind||10;
+  const players=lbPlayers.map(p=>({name:p.name,chips:stk,hand:[],bet:0,folded:false,allIn:false,acted:false}));
   const deck=makeDeck(1);
   players.forEach(p=>{p.hand=[deck.pop(),deck.pop()];});
-  const n=players.length;
-  const dealer=0, sb=1%n, bb=2%n;
-  players[sb].chips-=5; players[sb].bet=5;
-  players[bb].chips-=10; players[bb].bet=10;
-  // First to act is after BB (preflop)
+  const dealer=0,sb=1%n,bb=2%n;
+  players[sb].chips-=blind;players[sb].bet=blind;
+  players[bb].chips-=blind*2;players[bb].bet=blind*2;
   const firstAct=(bb+1)%n;
-  pkSt={players,deck,comm:[],pot:15,phase:'preflop',dealer,cur:firstAct,curBet:10,
-        minRaise:10,roundStart:firstAct};
-  myPkI=0; myPkHand=players[0].hand.slice();
-  // Broadcast start with all hands (each client knows only their own)
-  const handsMap={};
-  players.forEach((p,i)=>{ handsMap[p.name]=p.hand; });
-  bc({type:'start',game:'poker',names:players.map(p=>p.name),hands:handsMap});
-  setTimeout(()=>{ pkBC(); },300);
+  pkSt={players,deck,comm:[],pot:blind*3,phase:'preflop',dealer,
+        cur:firstAct,curBet:blind*2,minRaise:blind*2,blind};
+  myPkI=0; myPkHand=players[0].hand.slice(); pkGameOver=false;
+  const handsMap=Object.fromEntries(players.map(p=>[p.name,p.hand]));
+  bc({type:'start',game:'poker',names:players.map(p=>p.name),hands:handsMap,stk,blind});
+  setTimeout(()=>pkBC(),300);
   showScreen('poker'); pkRend();
+  // Deduct buyin from host locally (server will confirm)
+  syncBalance(-stk);
 }
 
 function pkClientStart(d){
-  // Find our index by name (case-insensitive, trim)
   const name=pName.trim().toLowerCase();
   myPkI=d.names.findIndex(n=>n.trim().toLowerCase()===name);
-  if(myPkI<0) myPkI=1; // clients are always non-zero index
+  if(myPkI<0) myPkI=1;
   myPkHand=(d.hands&&d.hands[pName])||[];
+  pkGameOver=false;
+  if(d.stk) syncBalance(-d.stk); // deduct buyin for client
   showScreen('poker');
   $('pkSt').textContent='Ожидание карт...';
 }
 
 function pkRecvState(s){
-  if(!s) return;
-  pkSt=s;
-  // Server sends each player's hand — read our own
-  if(s.hands && s.hands[pName]){
-    myPkHand=[...s.hands[pName]];
-  }
-  if(myPkHand.length>0 && pkSt.players[myPkI]){
-    pkSt.players[myPkI].hand=myPkHand;
+  if(!s)return; pkSt=s;
+  if(s.hands&&s.hands[pName]) myPkHand=[...s.hands[pName]];
+  if(myPkHand.length>0&&pkSt.players[myPkI]) pkSt.players[myPkI].hand=myPkHand;
+  // Handle win broadcast
+  if(s.winnerName&&!pkGameOver){
+    pkGameOver=true;
+    const isWinner=s.winnerName===pName;
+    if(isWinner){
+      syncBalance(s.pot);
+      setTimeout(()=>showWinner('🏆',s.winnerName+' побеждает!','Банк $'+s.pot,s.handName||'',s.winnerHand||[]),500);
+    } else {
+      setTimeout(()=>showWinner('😔',s.winnerName+' побеждает!','Вы проиграли',s.handName||''),500);
+    }
+    return;
   }
   pkRend();
 }
 
 function pkSan(st){
-  // Include each player's hand keyed by name — clients read only their own
   const hands=Object.fromEntries(st.players.map(p=>[p.name,p.hand]));
-  return {...st,
-    players:st.players.map(p=>({...p,hand:Array(p.hand.length).fill(null)})),
-    deck:[], hands};
+  return {...st,players:st.players.map(p=>({...p,hand:Array(p.hand.length).fill(null)})),deck:[],hands};
 }
-
-function pkBC(){
-  pkRend();
-  bc({type:'gs',s:pkSan(pkSt)});
-}
+function pkBC(){pkRend();bc({type:'gs',s:pkSan(pkSt)});}
 
 function pkRend(){
-  if(!pkSt) return;
+  if(!pkSt)return;
   const me=pkSt.players[myPkI];
   const pm={preflop:'Префлоп',flop:'Флоп',turn:'Тёрн',river:'Ривер',showdown:'Вскрытие'};
   $('pkPh').textContent=pm[pkSt.phase]||pkSt.phase;
@@ -755,83 +832,66 @@ function pkRend(){
   $('pkMN').textContent=me?me.name:pName;
   $('pkMC').textContent='$'+(me?me.chips:0);
   $('pkMB').textContent=me&&me.bet?' (ставка $'+me.bet+')':'';
-  // Community cards
-  const comm=$('pkComm'); comm.innerHTML='';
+  const comm=$('pkComm');comm.innerHTML='';
   for(let i=0;i<5;i++){
     const c=pkSt.comm[i];
-    if(c) comm.innerHTML+=rc(c,'pkc');
+    if(c)comm.innerHTML+=rc(c,'pkc');
     else{const ph=document.createElement('div');ph.style.cssText='width:46px;height:68px;border-radius:8px;border:1px dashed rgba(200,168,75,.2);background:rgba(0,0,0,.2)';comm.appendChild(ph);}
   }
-  // My hand
   const hand=myPkHand.length?myPkHand:(me?me.hand:[]);
   $('pkHand').innerHTML=hand.filter(Boolean).map(c=>rc(c,'pkhc')).join('');
-  // Opponents
-  const opps=$('pkOpps'); opps.innerHTML='';
+  const opps=$('pkOpps');opps.innerHTML='';
   pkSt.players.forEach((p,i)=>{
-    if(i===myPkI) return;
+    if(i===myPkI)return;
     const div=document.createElement('div');
-    const isActive=pkSt.cur===i&&pkSt.phase!=='showdown';
-    div.className='pk-seat'+(isActive?' active':'')+(p.folded?' folded':'');
-    const dealerBadge=pkSt.dealer===i?'<div class="dbn">D</div>':'';
-    div.innerHTML=dealerBadge+`<div class="pk-sn">${p.name}</div><div class="pk-sc">$${p.chips}</div>`+
-      `<div class="pk-mini">${p.hand.length||2?'<div class="pk-mb"></div><div class="pk-mb"></div>':''}</div>`+
+    div.className='pk-seat'+(pkSt.cur===i&&pkSt.phase!=='showdown'?' active':'')+(p.folded?' folded':'');
+    div.innerHTML=(pkSt.dealer===i?'<div class="dbn">D</div>':'')+
+      `<div class="pk-sn">${p.name}</div><div class="pk-sc">$${p.chips}</div>`+
+      `<div class="pk-mini"><div class="pk-mb"></div><div class="pk-mb"></div></div>`+
       `<div class="pk-sb${p.bet?' show':''}">$${p.bet}</div>`;
     opps.appendChild(div);
   });
-  // Action buttons
-  const myTurn=pkSt.cur===myPkI&&pkSt.phase!=='showdown'&&me&&!me.folded&&!me.allIn;
+  const myTurn=!pkGameOver&&pkSt.cur===myPkI&&pkSt.phase!=='showdown'&&me&&!me.folded&&!me.allIn;
   $('pkActs').style.display=myTurn?'flex':'none';
   $('pkRRow').style.display=myTurn?'flex':'none';
   if(myTurn&&me){
-    const toCall=pkSt.curBet-me.bet;
-    const canCheck=toCall<=0;
+    const toCall=pkSt.curBet-me.bet;const canCheck=toCall<=0;
     $('pkCheck').disabled=!canCheck;
     $('pkCall').disabled=canCheck||me.chips===0;
     $('pkCall').textContent=canCheck?'Колл':'Колл $'+Math.min(toCall,me.chips);
     $('pkRaise').disabled=me.chips<pkSt.minRaise;
     $('pkAllin').disabled=me.chips===0;
     const minR=Math.min(me.chips,pkSt.curBet+pkSt.minRaise);
-    $('pkSlider').min=minR; $('pkSlider').max=me.chips; $('pkSlider').value=minR;
+    $('pkSlider').min=minR;$('pkSlider').max=me.chips;$('pkSlider').value=minR;
     $('pkRA').textContent='$'+minR;
   }
-  $('pkSt').textContent=pkSt.phase==='showdown'?'Вскрытие!':
-    (pkSt.cur===myPkI?'Ваш ход!':'Ход: '+(pkSt.players[pkSt.cur]?.name||''));
+  $('pkSt').textContent=pkGameOver?'Игра окончена':
+    pkSt.phase==='showdown'?'Вскрытие!':(pkSt.cur===myPkI?'Ваш ход!':'Ход: '+(pkSt.players[pkSt.cur]?.name||''));
 }
 
 function pkAct(type){
   const a={type:'ga',action:type,p:myPkI};
   if(type==='raise') a.amt=parseInt($('pkSlider').value);
-  if(isHost) pkProc(a); else sh(a);
+  if(isHost)pkProc(a);else sh(a);
 }
 
 function pkProc(d){
-  if(!pkSt) return;
-  const s=pkSt, p=s.players[d.p];
-  if(!p||p.folded||p.allIn) return;
-  if(s.cur!==d.p) return; // not their turn
-
-  if(d.action==='fold'){
-    p.folded=true; p.acted=true;
-  } else if(d.action==='check'){
-    if(s.curBet>p.bet){ toast('Нельзя чекнуть — нужно коллировать!'); return; }
-    p.acted=true;
-  } else if(d.action==='call'){
-    const toCall=Math.min(s.curBet-p.bet, p.chips);
-    p.chips-=toCall; p.bet+=toCall; s.pot+=toCall; p.acted=true;
-    if(p.chips===0) p.allIn=true;
-  } else if(d.action==='raise'){
-    const target=Math.min(d.amt||s.curBet+s.minRaise, p.chips+p.bet);
-    const add=target-p.bet;
-    if(add<=0) return;
-    p.chips-=add; s.pot+=add; p.bet=target;
-    s.minRaise=target-s.curBet; s.curBet=target; p.acted=true;
-    if(p.chips===0) p.allIn=true;
-    // Reset acted for others (they need to respond to raise)
-    s.players.forEach((pl,i)=>{if(i!==d.p&&!pl.folded&&!pl.allIn) pl.acted=false;});
-  } else if(d.action==='allin'){
-    const add=p.chips; s.pot+=add; p.bet+=add; p.chips=0; p.allIn=true; p.acted=true;
-    if(p.bet>s.curBet){ s.minRaise=p.bet-s.curBet; s.curBet=p.bet;
-      s.players.forEach((pl,i)=>{if(i!==d.p&&!pl.folded&&!pl.allIn) pl.acted=false;}); }
+  if(!pkSt||pkGameOver)return;
+  const s=pkSt,p=s.players[d.p];
+  if(!p||p.folded||p.allIn||s.cur!==d.p)return;
+  if(d.action==='fold'){p.folded=true;p.acted=true;}
+  else if(d.action==='check'){if(s.curBet>p.bet){toast('Нельзя — нужно коллировать!');return;}p.acted=true;}
+  else if(d.action==='call'){const tc=Math.min(s.curBet-p.bet,p.chips);p.chips-=tc;p.bet+=tc;s.pot+=tc;p.acted=true;if(p.chips===0)p.allIn=true;}
+  else if(d.action==='raise'){
+    const tgt=Math.min(d.amt,p.chips+p.bet);const add=tgt-p.bet;if(add<=0)return;
+    p.chips-=add;s.pot+=add;p.bet=tgt;s.minRaise=tgt-s.curBet;s.curBet=tgt;p.acted=true;
+    if(p.chips===0)p.allIn=true;
+    s.players.forEach((pl,i)=>{if(i!==d.p&&!pl.folded&&!pl.allIn)pl.acted=false;});
+  }
+  else if(d.action==='allin'){
+    const add=p.chips;s.pot+=add;p.bet+=add;p.chips=0;p.allIn=true;p.acted=true;
+    if(p.bet>s.curBet){s.minRaise=p.bet-s.curBet;s.curBet=p.bet;
+      s.players.forEach((pl,i)=>{if(i!==d.p&&!pl.folded&&!pl.allIn)pl.acted=false;});}
   }
   pkAdvance();
 }
@@ -839,25 +899,17 @@ function pkProc(d){
 function pkAdvance(){
   const s=pkSt;
   const active=s.players.filter(p=>!p.folded);
-  // If only 1 left standing
   if(active.length===1){
-    active[0].chips+=s.pot;
-    pkBC();
-    setTimeout(()=>showWinner('🏆',active[0].name+' побеждает!','Все спасовали! Банк $'+s.pot,''),500);
+    const win=active[0]; win.chips+=s.pot;
+    pkFinish(win,s.pot,'Все спасовали!',[]);
     return;
   }
-  // Check if betting round complete
   const canAct=s.players.filter(p=>!p.folded&&!p.allIn);
   const roundDone=canAct.length===0||canAct.every(p=>p.acted&&p.bet===s.curBet);
-  if(roundDone){ pkNextStreet(); return; }
-  // Next player
-  let next=(s.cur+1)%s.players.length;
-  let tries=0;
-  while((s.players[next].folded||s.players[next].allIn)&&tries<s.players.length){
-    next=(next+1)%s.players.length; tries++;
-  }
-  s.cur=next;
-  pkBC();
+  if(roundDone){pkNextStreet();return;}
+  let next=(s.cur+1)%s.players.length,tries=0;
+  while((s.players[next].folded||s.players[next].allIn)&&tries<s.players.length){next=(next+1)%s.players.length;tries++;}
+  s.cur=next; pkBC();
 }
 
 function pkNextStreet(){
@@ -865,50 +917,49 @@ function pkNextStreet(){
   const streets=['preflop','flop','turn','river','showdown'];
   const idx=streets.indexOf(s.phase);
   s.phase=streets[idx+1]||'showdown';
-  if(s.phase==='showdown'){ pkShowdown(); return; }
-  // Reset bets
+  if(s.phase==='showdown'){pkShowdown();return;}
   s.players.forEach(p=>{p.bet=0;p.acted=false;});
-  s.curBet=0; s.minRaise=10;
-  // Find first active after dealer
-  let first=(s.dealer+1)%s.players.length;
-  let tries=0;
-  while((s.players[first].folded||s.players[first].allIn)&&tries<s.players.length){
-    first=(first+1)%s.players.length; tries++;
-  }
+  s.curBet=0;s.minRaise=s.blind;
+  let first=(s.dealer+1)%s.players.length,tries=0;
+  while((s.players[first].folded||s.players[first].allIn)&&tries<s.players.length){first=(first+1)%s.players.length;tries++;}
   s.cur=first;
-  if(s.phase==='flop') s.comm=[s.deck.pop(),s.deck.pop(),s.deck.pop()];
-  else if(s.phase==='turn') s.comm.push(s.deck.pop());
-  else if(s.phase==='river') s.comm.push(s.deck.pop());
+  if(s.phase==='flop')s.comm=[s.deck.pop(),s.deck.pop(),s.deck.pop()];
+  else if(s.phase==='turn')s.comm.push(s.deck.pop());
+  else if(s.phase==='river')s.comm.push(s.deck.pop());
   pkBC();
 }
 
 function pkShowdown(){
   const s=pkSt;
   const active=s.players.filter(p=>!p.folded);
-  // Show all hands in broadcast BEFORE winner calc
-  bc({type:'gs',s:{...pkSan(s), phase:'showdown', showHands: active.map(p=>({name:p.name,hand:p.hand}))}});
-  // Find winner
-  const win=active.reduce((best,p)=>{
-    return pkScore7(p.hand,s.comm)>pkScore7(best.hand,s.comm)?p:best;
-  });
-  win.chips+=s.pot; pkRend();
-  setTimeout(()=>showWinner('🏆',win.name+' побеждает!','Банк $'+s.pot,pkHandName(win.hand,s.comm),win.hand),600);
+  const win=active.reduce((b,p)=>pkScore7(p.hand,s.comm)>pkScore7(b.hand,s.comm)?p:b);
+  win.chips+=s.pot;
+  const hName=pkHandName(win.hand,s.comm);
+  pkFinish(win,s.pot,hName,win.hand);
+}
+
+function pkFinish(win,pot,desc,cards){
+  pkGameOver=true;
+  // Broadcast winner to all clients (they handle their own payout)
+  const winState={...pkSan(pkSt),winnerName:win.name,pot,handName:desc,winnerHand:cards};
+  bc({type:'gs',s:winState});
+  // Host pays itself
+  syncBalance(pot);
+  setTimeout(()=>showWinner('🏆',win.name+' побеждает!','Банк $'+pot,desc,cards),500);
 }
 
 function pkScore7(hand,comm){
   const all=[...hand,...comm].filter(Boolean);
-  if(all.length<2) return 0;
-  // Get best 5-card hand from all combinations
+  if(all.length<2)return 0;
   let best=0;
-  if(all.length<=5) return pkScore5(all);
+  if(all.length<=5)return pkScore5(all);
   for(let i=0;i<all.length-1;i++)
     for(let j=i+1;j<all.length;j++){
       const five=all.filter((_,k)=>k!==i&&k!==j);
-      const s=pkScore5(five); if(s>best) best=s;
+      const s=pkScore5(five);if(s>best)best=s;
     }
   return best;
 }
-
 function pkScore5(cards){
   const vals=cards.map(c=>RANKS.indexOf(c.r)).sort((a,b)=>b-a);
   const suits=cards.map(c=>c.s);
@@ -918,52 +969,49 @@ function pkScore5(cards){
   const uniq=[...new Set(vals)].sort((a,b)=>b-a);
   let isStraight=false;
   for(let i=0;i<=uniq.length-5;i++) if(uniq[i]-uniq[i+4]===4&&new Set(uniq.slice(i,i+5)).size===5){isStraight=true;break;}
-  // Ace-low straight: A-2-3-4-5
-  if(!isStraight&&uniq.includes(12)&&uniq.includes(0)&&uniq.includes(1)&&uniq.includes(2)&&uniq.includes(3)) isStraight=true;
+  if(!isStraight&&uniq.includes(12)&&uniq.includes(0)&&uniq.includes(1)&&uniq.includes(2)&&uniq.includes(3))isStraight=true;
   const high=vals[0];
-  if(isFlush&&isStraight) return 8000000+high;
-  if(cnt[0]===4) return 7000000+vals.find(v=>vc[v]===4)*1000+vals.find(v=>vc[v]===1)||0;
-  if(cnt[0]===3&&cnt[1]===2) return 6000000+vals.find(v=>vc[v]===3)*1000;
-  if(isFlush) return 5000000+high*1000+vals[1]*100+vals[2]*10+vals[3]+vals[4]/10;
-  if(isStraight) return 4000000+high;
-  if(cnt[0]===3) return 3000000+vals.find(v=>vc[v]===3)*1000+high;
-  if(cnt[0]===2&&cnt[1]===2){ const pairs=vals.filter(v=>vc[v]===2); return 2000000+Math.max(...pairs)*100+Math.min(...pairs)*10+vals.find(v=>vc[v]===1); }
-  if(cnt[0]===2) return 1000000+vals.find(v=>vc[v]===2)*1000+high;
+  if(isFlush&&isStraight)return 8000000+high;
+  if(cnt[0]===4)return 7000000+vals.find(v=>vc[v]===4)*1000;
+  if(cnt[0]===3&&cnt[1]===2)return 6000000+vals.find(v=>vc[v]===3)*1000;
+  if(isFlush)return 5000000+high*10000+vals[1]*1000+vals[2]*100+vals[3]*10+vals[4];
+  if(isStraight)return 4000000+high;
+  if(cnt[0]===3)return 3000000+vals.find(v=>vc[v]===3)*1000+high;
+  if(cnt[0]===2&&cnt[1]===2){const ps=vals.filter(v=>vc[v]===2);return 2000000+Math.max(...ps)*100+Math.min(...ps)*10;}
+  if(cnt[0]===2)return 1000000+vals.find(v=>vc[v]===2)*1000+high;
   return high*10000+vals[1]*1000+vals[2]*100+vals[3]*10+vals[4];
 }
-
 function pkHandName(hand,comm){
   const all=[...hand,...comm].filter(Boolean);
-  const s=pkScore5(all.length>5?all.slice(0,5):all);
-  if(s>=8000000) return '🃏 Стрит-флеш';
-  if(s>=7000000) return '🃏 Каре';
-  if(s>=6000000) return '🃏 Фулл-хаус';
-  if(s>=5000000) return '🃏 Флеш';
-  if(s>=4000000) return '🃏 Стрит';
-  if(s>=3000000) return '🃏 Тройка';
-  if(s>=2000000) return '🃏 Две пары';
-  if(s>=1000000) return '🃏 Пара';
+  if(all.length<5)return '';
+  const s=pkScore7(hand,comm);
+  if(s>=8000000)return '🃏 Стрит-флеш';if(s>=7000000)return '🃏 Каре';
+  if(s>=6000000)return '🃏 Фулл-хаус';if(s>=5000000)return '🃏 Флеш';
+  if(s>=4000000)return '🃏 Стрит';if(s>=3000000)return '🃏 Тройка';
+  if(s>=2000000)return '🃏 Две пары';if(s>=1000000)return '🃏 Пара';
   return '🃏 Старшая карта';
 }
 
 // ══════════════════════════════════════════════
 // ── DURAK ENGINE ──
 // ══════════════════════════════════════════════
-let dkSt=null, myDkI=0, dkSel=null, myDkHand=[];
+let dkSt=null,myDkI=0,dkSel=null,myDkHand=[];
+let dkGameOver=false;
 const DKR=['6','7','8','9','10','J','Q','K','A'];
 
 function dkInit(){
-  const players=lbPlayers.map((p,i)=>({name:p.name,hand:[],id:i}));
+  const players=lbPlayers.map((p,i)=>({name:p.name,hand:[],id:i,skip:false}));
   const deck=makeDkDeck();
   players.forEach(p=>{for(let i=0;i<6;i++)p.hand.push(deck.pop());});
-  const tr=deck[deck.length-1]; // Bottom card is trump
+  const tr=deck[deck.length-1];
   dkSt={players,deck,trump:tr.s,trCard:tr,table:[],att:0,def:1%players.length,phase:'attack',round:1};
-  myDkI=0; dkSel=null; myDkHand=players[0].hand.slice();
-  const handsMap={};
-  players.forEach(p=>{handsMap[p.name]=p.hand;});
-  bc({type:'start',game:'durak',names:players.map(p=>p.name),hands:handsMap});
+  myDkI=0; dkSel=null; dkGameOver=false;
+  myDkHand=players[0].hand.slice();
+  const handsMap=Object.fromEntries(players.map(p=>[p.name,p.hand]));
+  bc({type:'start',game:'durak',names:players.map(p=>p.name),hands:handsMap,stk:curBuyin});
   setTimeout(()=>dkBC(),300);
   showScreen('durak'); dkRend();
+  syncBalance(-curBuyin);
 }
 
 function dkClientStart(d){
@@ -971,64 +1019,65 @@ function dkClientStart(d){
   myDkI=d.names.findIndex(n=>n.trim().toLowerCase()===name);
   if(myDkI<0) myDkI=1;
   myDkHand=(d.hands&&d.hands[pName])||[];
-  dkSel=null; showScreen('durak');
+  dkSel=null; dkGameOver=false;
+  if(d.stk) syncBalance(-d.stk);
+  showScreen('durak');
 }
 
 function dkRecvState(s){
-  if(!s) return;
-  dkSt=s;
-  // Server sends authoritative hands — client reads only their own
-  if(s.hands && s.hands[pName]){
-    myDkHand=[...s.hands[pName]];
-  }
+  if(!s)return; dkSt=s;
+  if(s.hands&&s.hands[pName]) myDkHand=[...s.hands[pName]];
   if(dkSt.players[myDkI]) dkSt.players[myDkI].hand=myDkHand;
+  // Handle win broadcast
+  if(s.winnerName&&!dkGameOver){
+    dkGameOver=true;
+    const isWinner=s.winnerName===pName;
+    const pot=s.pot||curBuyin*2;
+    if(isWinner){
+      syncBalance(pot);
+      setTimeout(()=>showWinner('🃏',s.winnerName+' победил!','Банк $'+pot,'Дурак: '+(s.loserName||'?')),500);
+    } else {
+      setTimeout(()=>showWinner('😔',s.winnerName+' победил!','Вы проиграли $'+curBuyin,'Дурак: '+(s.loserName||pName)),500);
+    }
+    return;
+  }
   dkRend();
 }
 
 function dkSan(st){
-  // Include each player's real hand keyed by name — clients read only their own
   const hands=Object.fromEntries(st.players.map(p=>[p.name,p.hand]));
-  return {...st,
-    players:st.players.map(p=>({...p,hand:Array(p.hand.length).fill(null)})),
-    deck:Array(st.deck.length).fill(null), hands};
+  return {...st,players:st.players.map(p=>({...p,hand:Array(p.hand.length).fill(null)})),
+    deck:Array(st.deck.length).fill(null),hands};
 }
-
-function dkBC(){
-  dkRend();
-  bc({type:'gs',s:dkSan(dkSt)});
-}
+function dkBC(){dkRend();bc({type:'gs',s:dkSan(dkSt)});}
 
 function dkRend(){
-  if(!dkSt) return;
+  if(!dkSt)return;
   const s=dkSt;
   const hand=myDkHand.length?myDkHand:(s.players[myDkI]?s.players[myDkI].hand:[]);
-  $('dkInf').textContent='Раунд '+s.round;
+  $('dkInf').textContent='Раунд '+s.round+' · Колода: '+s.deck.length;
   $('dkTS').textContent=s.trump;
-  $('dkDC').textContent='Колода: '+s.deck.length;
+  $('dkDC').textContent='Козырь: '+s.trump;
   $('dkMN').textContent=s.players[myDkI]?s.players[myDkI].name:pName;
   const r=s.att===myDkI?'att':s.def===myDkI?'def':'';
   const mr=$('dkMR');
-  mr.textContent=r==='att'?'⚔️ Атака':r==='def'?'🛡 Защита':'Наблюдатель';
+  mr.textContent=r==='att'?'⚔️ Атака':r==='def'?'🛡 Защита':'—';
   mr.className='dk-mr '+r;
-  // Opponents
   const opps=$('dkOpps');opps.innerHTML='';
   s.players.forEach((p,i)=>{
     if(i===myDkI)return;
     const role=s.att===i?'att':s.def===i?'def':'';
-    const div=document.createElement('div');
-    div.className='dk-seat '+role;
+    const div=document.createElement('div');div.className='dk-seat '+role;
     div.innerHTML=`<div class="dk-sn">${p.name}</div><div class="dk-sc">🃏 ${p.hand.length}</div><div class="dk-sr ${role}">${role==='att'?'⚔️':role==='def'?'🛡':''}</div>`;
     opps.appendChild(div);
   });
-  // Table
   const tbl=$('dkTable');tbl.innerHTML='';
-  if(s.table.length===0) tbl.innerHTML='<div style="color:var(--dim);font-style:italic;font-size:14px">Стол пуст — ждём атаку</div>';
+  if(s.table.length===0) tbl.innerHTML='<div style="color:var(--dim);font-style:italic;font-size:14px">Стол пуст</div>';
   s.table.forEach(pair=>{
     const div=document.createElement('div');div.className='dk-pair';
     div.innerHTML=rc(pair.att,'dkc')+(pair.def?rc(pair.def,'dkc highlight'):'<div class="dkc cback"></div>');
     tbl.appendChild(div);
   });
-  // My hand
   const handEl=$('dkHand');handEl.innerHTML='';
   hand.forEach((c,i)=>{
     if(!c)return;
@@ -1038,64 +1087,59 @@ function dkRend(){
     el.addEventListener('click',()=>dkSel2(i));
     handEl.appendChild(el);
   });
-  const isA=s.att===myDkI,isD=s.def===myDkI;
+  const isA=s.att===myDkI&&s.phase==='attack';
+  const isD=s.def===myDkI;
   const undef=s.table.filter(p=>!p.def).length;
-  if(isA&&s.phase==='attack') $('dkSt').textContent='⚔️ Ваш ход — выберите карту для атаки';
-  else if(isD) $('dkSt').textContent='🛡 Отбивайтесь — нажмите на карту!';
+  if(dkGameOver) $('dkSt').textContent='Игра окончена';
+  else if(isA) $('dkSt').textContent='⚔️ Ваш ход — выберите карту для атаки';
+  else if(isD&&undef>0) $('dkSt').textContent='🛡 Отбивайтесь!';
+  else if(isD&&undef===0&&s.table.length>0) $('dkSt').textContent='🛡 Всё побито — нажмите «Бито!»';
   else $('dkSt').textContent='Ход: '+(s.players[s.att]?.name||'');
-  $('dkTake').style.display=isD&&undef>0?'block':'none';
-  $('dkPass').style.display=isA&&s.table.length>0&&undef===0?'block':'none';
+  $('dkTake').style.display=!dkGameOver&&isD&&undef>0?'block':'none';
+  $('dkPass').style.display=!dkGameOver&&isA&&s.table.length>0&&undef===0?'block':'none';
 }
 
 function dkSel2(i){
-  if(!dkSt)return;
+  if(!dkSt||dkGameOver)return;
   const s=dkSt;
   const hand=myDkHand.length?myDkHand:s.players[myDkI].hand;
-  const card=hand[i];
-  if(!card)return;
-  const isA=s.att===myDkI,isD=s.def===myDkI;
-  if(isA&&s.phase==='attack'){
-    // Check: can only attack with same rank as cards on table (if table not empty)
+  const card=hand[i];if(!card)return;
+  const isA=s.att===myDkI&&s.phase==='attack';
+  const isD=s.def===myDkI;
+  if(isA){
     if(s.table.length>0){
-      const tRanks=new Set([...s.table.flatMap(p=>[p.att?.r,p.def?.r].filter(Boolean))]);
-      if(!tRanks.has(card.r)){toast('Можно подкидывать только карты тех же достоинств!');return;}
+      const tRanks=new Set(s.table.flatMap(p=>[p.att?.r,p.def?.r].filter(Boolean)));
+      if(!tRanks.has(card.r)){toast('Можно подкидывать только те же достоинства!');return;}
     }
     dkSel=i;dkRend();
-    const a={type:'ga',action:'attack',ci:i,p:myDkI,card};
+    const a={type:'ga',action:'attack',p:myDkI,card};
     if(isHost)dkProc(a);else sh(a);dkSel=null;
-  }else if(isD){
+  } else if(isD){
     const ui=s.table.findIndex(p=>!p.def);
     if(ui<0){toast('Нечего отбивать');return;}
     dkSel=i;dkRend();
-    const a={type:'ga',action:'defend',ci:i,pi:ui,p:myDkI,card};
+    const a={type:'ga',action:'defend',pi:ui,p:myDkI,card};
     if(isHost)dkProc(a);else sh(a);dkSel=null;
   }
 }
 
-function dkTake(){const a={type:'ga',action:'take',p:myDkI};if(isHost)dkProc(a);else sh(a);}
-function dkPass(){const a={type:'ga',action:'pass',p:myDkI};if(isHost)dkProc(a);else sh(a);}
+function dkTake(){if(!dkGameOver){const a={type:'ga',action:'take',p:myDkI};if(isHost)dkProc(a);else sh(a);}}
+function dkPass(){if(!dkGameOver){const a={type:'ga',action:'pass',p:myDkI};if(isHost)dkProc(a);else sh(a);}}
 
 function dkProc(d){
-  if(!dkSt)return;
-  const s=dkSt;
-  const n=s.players.length;
-  const defP=s.players[s.def];
+  if(!dkSt||dkGameOver)return;
+  const s=dkSt,n=s.players.length;
 
   if(d.action==='attack'){
-    const p=s.players[d.p];
-    const c=d.card; // card object always sent in action
-    if(!c)return;
-    // Remove by matching card identity (works across devices)
+    const p=s.players[d.p];const c=d.card;if(!c)return;
     const ci=p.hand.findIndex(h=>h&&h.r===c.r&&h.s===c.s);
-    if(ci>=0) p.hand.splice(ci,1);
-    if(d.p===myDkI) myDkHand=[...p.hand];
-    s.table.push({att:c,def:null});
-    s.phase='defense';
-    dkBC();
+    if(ci>=0)p.hand.splice(ci,1);
+    if(d.p===myDkI)myDkHand=[...p.hand];
+    s.table.push({att:c,def:null});s.phase='defense';
+    dkCheckWin(s); dkBC();
   }
   else if(d.action==='defend'){
-    const p=s.players[d.p];
-    const dc=d.card;
+    const p=s.players[d.p];const dc=d.card;
     const pair=s.table[d.pi];
     if(!dc||!pair||pair.def)return;
     const ai=DKR.indexOf(pair.att.r),di=DKR.indexOf(dc.r);
@@ -1103,66 +1147,56 @@ function dkProc(d){
     if(!valid){toast('Нельзя побить эту карту!');return;}
     pair.def=dc;
     const ci=p.hand.findIndex(h=>h&&h.r===dc.r&&h.s===dc.s);
-    if(ci>=0) p.hand.splice(ci,1);
-    if(d.p===myDkI) myDkHand=[...p.hand];
-    if(s.table.every(p=>p.def)) s.phase='attack';
-    dkBC();
+    if(ci>=0)p.hand.splice(ci,1);
+    if(d.p===myDkI)myDkHand=[...p.hand];
+    if(s.table.every(p=>p.def))s.phase='attack';
+    dkCheckWin(s); dkBC();
   }
   else if(d.action==='take'){
+    // Defender takes all cards and SKIPS next attack
+    const defP=s.players[s.def];
     s.table.forEach(pr=>{defP.hand.push(pr.att);if(pr.def)defP.hand.push(pr.def);});
-    if(s.def===myDkI) myDkHand=[...defP.hand];
+    if(s.def===myDkI)myDkHand=[...defP.hand];
     s.table=[];s.phase='attack';
-    const newAtt=(s.att+1)%n;
-    s.att=newAtt; s.def=(newAtt+1)%n;
-    dkDraw(s); dkBC();
+    // After take: next attacker is after defender (defender skips)
+    const nextAtt=(s.def+1)%n;
+    s.att=nextAtt; s.def=(nextAtt+1)%n;
+    dkDraw(s); dkCheckWin(s); dkBC();
   }
   else if(d.action==='pass'){
-    // All cards beaten — clear table, rotate
+    // Cards beaten — defender becomes next attacker
     s.table=[];s.phase='attack';s.round++;
     s.att=s.def%n; s.def=(s.att+1)%n;
-    dkDraw(s);
-    // Check win condition
-    const out=s.players.filter(p=>p.hand.length===0&&s.deck.length===0);
-    if(out.length>0){
-      const losers=s.players.filter(p=>p.hand.length>0);
-      const loser=losers.length>0?losers.reduce((a,b)=>a.hand.length>b.hand.length?a:b):null;
-      dkBC();
-      setTimeout(()=>showWinner('🃏',out[0].name+' побеждает!',loser?loser.name+' — дурак! 🤣':'',`Раунд ${s.round}`),400);
-      return;
-    }
-    dkBC();
+    dkDraw(s); dkCheckWin(s); dkBC();
   }
+}
+
+function dkCheckWin(s){
+  // Win condition: hand empty AND deck empty → player wins immediately
+  const winners=s.players.filter(p=>p.hand.length===0&&s.deck.length===0);
+  if(winners.length===0)return;
+  // The loser is whoever has most cards
+  const remaining=s.players.filter(p=>p.hand.length>0);
+  if(remaining.length===0)return; // edge case all out
+  const loser=remaining.reduce((a,b)=>a.hand.length>=b.hand.length?a:b);
+  const winner=winners[0];
+  const pot=curBuyin*s.players.length;
+  dkGameOver=true;
+  // Broadcast win
+  const winState={...dkSan(s),winnerName:winner.name,loserName:loser.name,pot};
+  bc({type:'gs',s:winState});
+  // Host pays itself if winner
+  if(isHost&&winner.name===lbPlayers[myDkI]?.name) syncBalance(pot);
+  setTimeout(()=>showWinner('🃏',winner.name+' победил!','Банк $'+pot,'Дурак: '+loser.name+' 🤣'),400);
 }
 
 function dkDraw(s){
-  // Draw cards from deck after each round
   const order=[s.att,s.def,...s.players.map((_,i)=>i).filter(i=>i!==s.att&&i!==s.def)];
   order.forEach(i=>{
     const p=s.players[i];
-    while(p.hand.length<6&&s.deck.length>0) p.hand.push(s.deck.pop());
-    if(i===myDkI) myDkHand=[...p.hand];
+    while(p.hand.length<6&&s.deck.length>0)p.hand.push(s.deck.pop());
+    if(i===myDkI)myDkHand=[...p.hand];
   });
-}
-
-// ── BALANCE SYNC ──
-const tg=window.Telegram?.WebApp;
-let tgUser=null;
-
-async function initServer(){
-  if(!tg)return;
-  tg.ready();
-  tgUser=tg.initDataUnsafe?.user;
-  if(!tgUser)return;
-  try{
-    const res=await fetch(SERVER+'/api/register',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tg_id:tgUser.id,username:tgUser.username||'',first_name:tgUser.first_name||'Игрок'})});
-    const data=await res.json();
-    bjBal=data.balance;
-    if($('bjBal'))$('bjBal').textContent=bjBal;
-    if($('bjTot'))$('bjTot').textContent=bjBal;
-    if($('pName')&&!$('pName').value){$('pName').value=data.name;pName=data.name;}
-    toast('💰 Баланс: $'+bjBal);
-  }catch(e){}
 }
 
 window.addEventListener('load',initServer);
