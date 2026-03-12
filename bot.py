@@ -448,7 +448,8 @@ async def handle_any(update: Update, ctx: ContextTypes.DEFAULT_TYPE, from_start=
     u = update.effective_user
     if not u: return
     text = (update.message.text or "").strip()
-    if not text or text.startswith('/'): return  # игнорировать пустые/команды
+    # Игнорировать команды и пустые сообщения — НО только если не вызвано из /start
+    if not from_start and (not text or text.startswith('/')): return
 
     # Уже зарегистрирован
     if player_exists(u.id):
@@ -456,16 +457,15 @@ async def handle_any(update: Update, ctx: ContextTypes.DEFAULT_TYPE, from_start=
         row = get_player(u.id)
         nick, bal = row[1], row[2]
         kb = play_kb(u.id)
-        if from_start:
-            await update.message.reply_text(
-                f"🎰 *Casino Night*\n\n"
-                f"С возвращением, *{nick}*! 🎉\n"
-                f"💰 Баланс: *${bal}*\n\n"
-                f"🃏 /play — открыть казино\n"
-                f"💵 /balance — баланс\n"
-                f"🎁 /daily — бонус $500 (раз в 24ч)\n"
-                f"👑 /top — топ игроков",
-                parse_mode="Markdown", reply_markup=kb)
+        await update.message.reply_text(
+            f"🎰 Casino Night\n\n"
+            f"С возвращением, {nick}! 🎉\n"
+            f"💰 Баланс: ${bal}\n\n"
+            f"🃏 /play — открыть казино\n"
+            f"💵 /balance — баланс\n"
+            f"🎁 /daily — бонус $500 (раз в 24ч)\n"
+            f"👑 /top — топ игроков",
+            reply_markup=kb)
         return
 
     # Ожидает ввода ника
@@ -506,7 +506,7 @@ async def handle_any(update: Update, ctx: ContextTypes.DEFAULT_TYPE, from_start=
         await update.message.reply_text("⚠️ Ошибка. Попробуй ввести ник ещё раз (только буквы/цифры):")
       return
 
-    # Новый пользователь — начать регистрацию
+    # Новый пользователь — начать регистрацию (или повторный /start)
     set_pending(u.id)
     await update.message.reply_text(
         f"🎰 *Casino Night*\n\n"
