@@ -460,16 +460,27 @@ function rc(card,cls=''){
   return`<div class="card ${col} ${cls}"><div class="tl">${card.r}<br>${card.s}</div><div class="cs">${card.s}</div><div class="br">${card.r}<br>${card.s}</div></div>`;
 }
 
-// ═══════════════════════════════════════════════════
-// ── БАЛАНС ──
-// Слои: localStorage (мгновенный) → сервер (постоянный)
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// ── БАЛАНС
+// playerId = tg_id (если есть) или uuid из localStorage
+// Сервер всегда источник правды. localStorage = быстрый кэш.
+// ═══════════════════════════════════════════════════════════
 const SERVER='https://casino-night-production.up.railway.app';
-let tgUser=null, myBalance=0;
+let tgUser=null, myBalance=0, _playerId=null;
+
+function _getPlayerId(){
+  if(_playerId) return _playerId;
+  // Telegram ID приоритет
+  if(tgUser?.id){ _playerId=String(tgUser.id); return _playerId; }
+  // Иначе — постоянный uuid в localStorage
+  let uid=localStorage.getItem('casino_pid');
+  if(!uid){ uid='p'+Date.now()+Math.random().toString(36).slice(2,7); localStorage.setItem('casino_pid',uid); }
+  _playerId=uid; return _playerId;
+}
 
 function _loadLocal(){
   const v=parseInt(localStorage.getItem('casino_balance')||'-1');
-  return v>=0?v:-1; // -1 означает «нет сохранённого»
+  return v>=0?v:-1;
 }
 function _saveLocal(v){
   localStorage.setItem('casino_balance',String(Math.max(0,v)));
@@ -483,71 +494,117 @@ function updateBalanceUI(){
   if($('dkBal'))  $('dkBal').textContent=s;
   if($('coinBal'))$('coinBal').textContent=s;
   bjBal=myBalance;
-  _saveLocal(myBalance);
+}
+
+async function _apiFetch(path, opts={}){
+  const r=await fetch(SERVER+path, {
+    headers:{'Content-Type':'application/json'}, ...opts
+  });
+  if(!r.ok){ const t=await r.text(); throw new Error(`${r.status}: ${t}`); }
+  return r.json();
+}
+
+async function fetchServerBalance(showToast=false){
+  try{
+    const pid=_getPlayerId();
+    // Если pid — число, это tg_id; иначе — uuid (только localStorage)
+    const isTg=/^\d+$/.test(pid);
+    if(!isTg) return; // без Telegram нет смысла обращаться к серверу
+    const d=await _apiFetch(`/api/balance?tg_id=${pid}&_t=${Date.now()}`);
+    if(d.balance!==undefined && !isNaN(d.balance)){
+      const prev=myBalance;
+      myBalance=d.balance; bjBal=myBalance;
+      _saveLocal(myBalance); updateBalanceUI();
+      if(showToast && d.balance!==prev)
+        toast('💰 Синхронизировано: $'+myBalance);
+    }
+  }catch(e){ console.warn('fetchServerBalance:',e.message); }
 }
 
 async function initServer(){
-  // Сразу берём из localStorage
+  // Шаг 1: показать кэш мгновенно
   const local=_loadLocal();
   if(local>=0){ myBalance=local; updateBalanceUI(); }
 
+  // Шаг 2: попробовать получить Telegram контекст
   const tg=window.Telegram?.WebApp;
-  if(!tg){ if(local<0){myBalance=1000;updateBalanceUI();} return; }
-  tg.ready();
-  tgUser=tg.initDataUnsafe?.user;
-  if(!tgUser){ if(local<0){myBalance=1000;updateBalanceUI();} return; }
-
-  try{
-    const r=await fetch(SERVER+'/api/register',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tg_id:tgUser.id,username:tgUser.username||'',first_name:tgUser.first_name||'Игрок'})
-    });
-    const d=await r.json();
-    if(d.balance!==undefined){
-      myBalance=d.balance; _saveLocal(myBalance); updateBalanceUI();
+  if(tg){
+    tg.ready();
+    try{ tg.expand(); }catch(e){}
+    tgUser=tg.initDataUnsafe?.user || null;
+    // Дополнительная попытка — иногда user появляется с задержкой
+    if(!tgUser){
+      await new Promise(res=>setTimeout(res,300));
+      tgUser=tg.initDataUnsafe?.user || null;
     }
-    if($('pName')&&!$('pName').value){
-      $('pName').value=d.name||tgUser.first_name||'Игрок';
-      pName=d.name||tgUser.first_name||'Игрок';
-    }
-    toast('💰 Баланс: $'+myBalance);
-  }catch(e){
-    if(local<0){myBalance=1000;_saveLocal(1000);updateBalanceUI();}
-    toast('⚠️ Оффлайн · $'+myBalance);
   }
+
+  // Шаг 3: зарегистрировать на сервере и получить реальный баланс
+  // Работает только если есть tg_id
+  if(tgUser?.id){
+    _playerId=String(tgUser.id);
+    try{
+      const d=await _apiFetch('/api/register',{
+        method:'POST',
+        body:JSON.stringify({tg_id:tgUser.id, username:tgUser.username||'', first_name:tgUser.first_name||'Игрок'})
+      });
+      console.log('Register response:', JSON.stringify(d));
+      if(d.balance!==undefined && !isNaN(d.balance)){
+        myBalance=d.balance; bjBal=myBalance;
+        _saveLocal(myBalance); updateBalanceUI();
+        toast('💰 Баланс: $'+myBalance);
+      }
+      if($('pName')&&!$('pName').value){
+        $('pName').value=d.name||tgUser.first_name||'Игрок';
+        pName=d.name||tgUser.first_name||'Игрок';
+      }
+    }catch(e){
+      console.error('initServer register error:',e.message);
+      if(local<0){ myBalance=1000; _saveLocal(1000); updateBalanceUI(); }
+      toast('⚠️ Оффлайн · $'+myBalance);
+    }
+  } else {
+    // Нет Telegram — локальный режим
+    console.warn('No tgUser found. initDataUnsafe:', JSON.stringify(tg?.initDataUnsafe));
+    if(local<0){ myBalance=1000; _saveLocal(1000); updateBalanceUI(); }
+  }
+
+  // Шаг 4: слушать возврат в приложение → синхронизировать баланс
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible') fetchServerBalance(true);
+  });
+  window.addEventListener('focus',()=>fetchServerBalance(false));
+  setInterval(()=>fetchServerBalance(false), 20000);
 }
 
-// delta>0 = выигрыш, delta<0 = проигрыш/ставка
 async function syncBalance(delta){
-  myBalance=Math.max(0,myBalance+delta);
-  bjBal=myBalance;
-  _saveLocal(myBalance);
-  updateBalanceUI();
-  if(!tgUser) return myBalance;
+  // Оптимистичное обновление UI
+  myBalance=Math.max(0, myBalance+delta);
+  bjBal=myBalance; _saveLocal(myBalance); updateBalanceUI();
+
+  const pid=_getPlayerId();
+  const isTg=/^\d+$/.test(pid);
+  if(!isTg) return myBalance; // без Telegram только локально
+
   try{
-    const r=await fetch(SERVER+'/api/update',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tg_id:tgUser.id,delta:Math.round(delta)})
+    const d=await _apiFetch('/api/update',{
+      method:'POST',
+      body:JSON.stringify({tg_id:pid, delta:Math.round(delta)})
     });
-    const d=await r.json();
-    if(d.balance!==undefined){
+    console.log(`syncBalance delta=${delta} server=${d.balance}`);
+    if(d.balance!==undefined && !isNaN(d.balance)){
       myBalance=d.balance; bjBal=myBalance;
       _saveLocal(myBalance); updateBalanceUI();
     }
-  }catch(e){/* локально уже сохранено */}
+  }catch(e){
+    console.error('syncBalance error:',e.message);
+    _saveLocal(myBalance);
+  }
   return myBalance;
 }
 
 async function refreshBalance(){
-  if(!tgUser) return;
-  try{
-    const r=await fetch(`${SERVER}/api/balance?tg_id=${tgUser.id}`);
-    const d=await r.json();
-    if(d.balance!==undefined){
-      myBalance=d.balance; bjBal=myBalance;
-      _saveLocal(myBalance); updateBalanceUI();
-    }
-  }catch(e){}
+  await fetchServerBalance(false);
 }
 
 // ── ROOM STATE ──
@@ -556,11 +613,9 @@ let pollTimer=null,lastMsgSeq=0,lastActSeq=0,gameStarted=false;
 let curBuyin=0,curBlind=10,curStake='small';
 
 function getUid(){
-  if(myUid)return myUid;
-  if(tgUser?.id){myUid=String(tgUser.id);return myUid;}
-  let id=localStorage.getItem('casino_uid');
-  if(!id){id='u'+Date.now()+Math.floor(Math.random()*9999);localStorage.setItem('casino_uid',id);}
-  myUid=id;return myUid;
+  if(myUid) return myUid;
+  myUid=_getPlayerId();
+  return myUid;
 }
 function bc(data){if(!curRoomId)return;fetch(`${SERVER}/api/rooms/push`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room_id:curRoomId,uid:getUid(),msg:data})}).catch(()=>{});}
 function sh(data){if(!curRoomId)return;fetch(`${SERVER}/api/rooms/action`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room_id:curRoomId,uid:getUid(),action:data})}).catch(()=>{});}

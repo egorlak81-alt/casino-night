@@ -125,7 +125,16 @@ def _cleanup(r):
 
 # ── FLASK ──
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*"}},
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET","POST","OPTIONS"])
+
+@app.after_request
+def add_cors(resp):
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
 
 tg_app = None
 tg_loop = None  # shared asyncio loop для бота
@@ -294,6 +303,13 @@ def api_update():
 def api_top():
     rows = get_top() or []
     return jsonify([{"name":r[0],"balance":r[1],"games":r[2]} for r in rows])
+
+@app.route("/api/debug")
+def api_debug():
+    """Debug endpoint — показывает все игроки и балансы"""
+    rows = qall("SELECT tg_id, first_name, balance, games_played, last_daily FROM players ORDER BY created_at DESC LIMIT 20") or []
+    return jsonify([{"tg_id":r[0],"name":r[1],"balance":r[2],"games":r[3],
+                     "last_daily":str(r[4]) if r[4] else None} for r in rows])
 
 # ── BOT HANDLERS ──
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
