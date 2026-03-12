@@ -248,12 +248,17 @@ def api_rooms_action():
             if len(r['actions']) > 100: r['actions'] = r['actions'][-100:]
     return jsonify({"ok":True})
 
-@app.route("/api/register", methods=["POST"])
+@app.route("/api/register", methods=["POST","OPTIONS"])
 def api_register():
+    if request.method == "OPTIONS": return jsonify({}), 200
     d = request.get_json() or {}; tg_id = d.get("tg_id")
     if not tg_id: return jsonify({"error":"no tg_id"}), 400
-    ensure_player(tg_id, d.get("username",""), d.get("first_name","Игрок"))
-    return jsonify({"balance":get_balance(tg_id),"name":d.get("first_name","Игрок")})
+    ensure_player(int(tg_id), d.get("username",""), d.get("first_name","Игрок"))
+    r = qone("SELECT balance, first_name FROM players WHERE tg_id=%s",(int(tg_id),))
+    bal = r[0] if r else 1000
+    name = r[1] if r else d.get("first_name","Игрок")
+    log.info(f"Register tg_id={tg_id} balance={bal}")
+    return jsonify({"balance": bal, "name": name})
 
 @app.route("/api/balance")
 def api_balance():
@@ -261,14 +266,29 @@ def api_balance():
     if not tg_id: return jsonify({"error":"no tg_id"}), 400
     return jsonify({"balance":get_balance(tg_id)})
 
-@app.route("/api/update", methods=["POST"])
+@app.route("/api/update", methods=["POST","OPTIONS"])
 def api_update():
-    """delta>0 = win (add), delta<0 = loss (subtract abs)"""
+    """
+    delta>0 = добавить к балансу (выигрыш)
+    delta<0 = вычесть из баланса (проигрыш)
+    Можно также передать absolute=true и sign отдельно.
+    """
+    if request.method == "OPTIONS": return jsonify({}), 200
     d = request.get_json() or {}
-    tg_id = d.get("tg_id"); delta = int(d.get("delta",0))
+    tg_id = d.get("tg_id")
+    delta = int(d.get("delta", 0))
     if not tg_id: return jsonify({"error":"no tg_id"}), 400
-    bal = update_balance(int(tg_id), abs(delta), delta > 0)
-    return jsonify({"balance": bal})
+    tid = int(tg_id)
+    if delta > 0:
+        qexec("UPDATE players SET balance=balance+%s, total_won=total_won+%s, games_played=games_played+1 WHERE tg_id=%s",
+              (delta, delta, tid))
+    elif delta < 0:
+        amt = abs(delta)
+        qexec("UPDATE players SET balance=GREATEST(0,balance-%s), total_lost=total_lost+%s, games_played=games_played+1 WHERE tg_id=%s",
+              (amt, amt, tid))
+    bal = get_balance(tid)
+    log.info(f"Balance update tg_id={tid} delta={delta} -> {bal}")
+    return jsonify({"balance": bal, "delta": delta})
 
 @app.route("/api/top")
 def api_top():
