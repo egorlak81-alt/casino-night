@@ -203,10 +203,13 @@ def api_me():
     tg_id = request.args.get("tg_id", type=int)
     if not tg_id: return jsonify({"error": "no tg_id"}), 400
     row = get_player(tg_id)
+    log.info(f"[ME] tg_id={tg_id} row={'found nick='+repr(row[1]) if row else 'NOT FOUND'}")
     if not row:
         return jsonify({"exists": False}), 200
-    # Если ник пустой — сгенерировать из tg_id чтобы не блокировать вход
-    nick = row[1] if row[1] else f"player{tg_id % 10000}"
+    nick = row[1] if row[1] else f"Player{tg_id % 10000}"
+    if not row[1]:
+        try: qexec("UPDATE players SET nickname=%s WHERE tg_id=%s AND (nickname IS NULL OR nickname='')", (nick, tg_id))
+        except: pass
     return jsonify({"exists": True, "tg_id": row[0], "nickname": nick,
                     "balance": row[2], "total_won": row[3],
                     "total_lost": row[4], "games_played": row[5]})
