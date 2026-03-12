@@ -711,9 +711,11 @@ function pkInit(){
 }
 
 function pkClientStart(d){
-  myPkI=d.names.indexOf(pName);
-  if(myPkI<0) myPkI=0;
-  myPkHand=d.hands[pName]||[];
+  // Find our index by name (case-insensitive, trim)
+  const name=pName.trim().toLowerCase();
+  myPkI=d.names.findIndex(n=>n.trim().toLowerCase()===name);
+  if(myPkI<0) myPkI=1; // clients are always non-zero index
+  myPkHand=(d.hands&&d.hands[pName])||[];
   showScreen('poker');
   $('pkSt').textContent='Ожидание карт...';
 }
@@ -721,7 +723,10 @@ function pkClientStart(d){
 function pkRecvState(s){
   if(!s) return;
   pkSt=s;
-  // Restore our hand (server state has it hidden)
+  // Server sends each player's hand — read our own
+  if(s.hands && s.hands[pName]){
+    myPkHand=[...s.hands[pName]];
+  }
   if(myPkHand.length>0 && pkSt.players[myPkI]){
     pkSt.players[myPkI].hand=myPkHand;
   }
@@ -729,8 +734,11 @@ function pkRecvState(s){
 }
 
 function pkSan(st){
-  // Send state with all hands hidden (clients restore their own)
-  return {...st, players:st.players.map(p=>({...p,hand:[]})), deck:[]};
+  // Include each player's hand keyed by name — clients read only their own
+  const hands=Object.fromEntries(st.players.map(p=>[p.name,p.hand]));
+  return {...st,
+    players:st.players.map(p=>({...p,hand:Array(p.hand.length).fill(null)})),
+    deck:[], hands};
 }
 
 function pkBC(){
@@ -959,23 +967,30 @@ function dkInit(){
 }
 
 function dkClientStart(d){
-  myDkI=d.names.indexOf(pName);
-  if(myDkI<0) myDkI=0;
-  myDkHand=d.hands[pName]||[];
+  const name=pName.trim().toLowerCase();
+  myDkI=d.names.findIndex(n=>n.trim().toLowerCase()===name);
+  if(myDkI<0) myDkI=1;
+  myDkHand=(d.hands&&d.hands[pName])||[];
   dkSel=null; showScreen('durak');
 }
 
 function dkRecvState(s){
   if(!s) return;
   dkSt=s;
-  if(myDkHand.length>0&&dkSt.players[myDkI]){
-    dkSt.players[myDkI].hand=myDkHand;
+  // Server sends authoritative hands — client reads only their own
+  if(s.hands && s.hands[pName]){
+    myDkHand=[...s.hands[pName]];
   }
+  if(dkSt.players[myDkI]) dkSt.players[myDkI].hand=myDkHand;
   dkRend();
 }
 
 function dkSan(st){
-  return {...st,players:st.players.map(p=>({...p,hand:[]})),deck:[]};
+  // Include each player's real hand keyed by name — clients read only their own
+  const hands=Object.fromEntries(st.players.map(p=>[p.name,p.hand]));
+  return {...st,
+    players:st.players.map(p=>({...p,hand:Array(p.hand.length).fill(null)})),
+    deck:Array(st.deck.length).fill(null), hands};
 }
 
 function dkBC(){
@@ -1064,40 +1079,36 @@ function dkProc(d){
   if(!dkSt)return;
   const s=dkSt;
   const n=s.players.length;
-  const attP=s.players[s.att];
   const defP=s.players[s.def];
 
   if(d.action==='attack'){
-    const hand=d.p===myDkI&&myDkHand.length?myDkHand:s.players[d.p].hand;
-    const c=d.card||hand[d.ci];
+    const p=s.players[d.p];
+    const c=d.card; // card object always sent in action
     if(!c)return;
-    // Remove from hand
-    if(d.p===myDkI&&myDkHand.length){
-      myDkHand=myDkHand.filter((_,i)=>i!==d.ci);
-      s.players[myDkI].hand=myDkHand;
-    } else { s.players[d.p].hand.splice(d.ci,1); }
+    // Remove by matching card identity (works across devices)
+    const ci=p.hand.findIndex(h=>h&&h.r===c.r&&h.s===c.s);
+    if(ci>=0) p.hand.splice(ci,1);
+    if(d.p===myDkI) myDkHand=[...p.hand];
     s.table.push({att:c,def:null});
     s.phase='defense';
     dkBC();
   }
   else if(d.action==='defend'){
-    const hand=d.p===myDkI&&myDkHand.length?myDkHand:s.players[d.p].hand;
-    const dc=d.card||hand[d.ci];
+    const p=s.players[d.p];
+    const dc=d.card;
     const pair=s.table[d.pi];
     if(!dc||!pair||pair.def)return;
     const ai=DKR.indexOf(pair.att.r),di=DKR.indexOf(dc.r);
     const valid=(dc.s===pair.att.s&&di>ai)||(dc.s===s.trump&&pair.att.s!==s.trump);
     if(!valid){toast('Нельзя побить эту карту!');return;}
     pair.def=dc;
-    if(d.p===myDkI&&myDkHand.length){
-      myDkHand=myDkHand.filter((_,i)=>i!==d.ci);
-      s.players[myDkI].hand=myDkHand;
-    } else { s.players[d.p].hand.splice(d.ci,1); }
+    const ci=p.hand.findIndex(h=>h&&h.r===dc.r&&h.s===dc.s);
+    if(ci>=0) p.hand.splice(ci,1);
+    if(d.p===myDkI) myDkHand=[...p.hand];
     if(s.table.every(p=>p.def)) s.phase='attack';
     dkBC();
   }
   else if(d.action==='take'){
-    // Defender takes all cards
     s.table.forEach(pr=>{defP.hand.push(pr.att);if(pr.def)defP.hand.push(pr.def);});
     if(s.def===myDkI) myDkHand=[...defP.hand];
     s.table=[];s.phase='attack';
