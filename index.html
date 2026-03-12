@@ -630,7 +630,7 @@ async function syncBalance(delta){
 let _lastRefresh=0;
 async function refreshBalance(){
   if(!myTgId) return;
-  const now=Date.now();if(now-_lastRefresh<5000)return;_lastRefresh=now;
+  const now=Date.now();if(now-_lastRefresh<10000)return;_lastRefresh=now;
   try{
     const d=await apiFetch(`/api/balance?tg_id=${myTgId}`);
     myBalance=d.balance; myNick=d.nickname||myNick;
@@ -647,29 +647,22 @@ if('serviceWorker' in navigator){
 // DOMContentLoaded — не ждём шрифты/картинки/внешние скрипты
 document.addEventListener('DOMContentLoaded', async ()=>{
   showScreen('loading');
-  setLoading('Подключение...');
-
-  // ── Ждём загрузку Telegram SDK (макс 2 сек) ──
-  for(let i=0;i<20&&!window.Telegram?.WebApp?.initData;i++)
-    await new Promise(r=>setTimeout(r,100));
+  setLoading('Подключение к Telegram...');
 
   const _tg = window.Telegram?.WebApp;
   if(_tg){ try{_tg.ready();_tg.expand();}catch(e){} }
 
-  // 1: initData parse
+  // 1: initData
   try{
     const raw=_tg?.initData||'';
-    if(raw){
-      const userStr=new URLSearchParams(raw).get('user');
-      if(userStr){ const u=JSON.parse(userStr); if(u&&u.id) myTgId=u.id; }
-    }
-  }catch(e){ console.warn('[TG1]',e.message); }
+    if(raw){ const u=JSON.parse(new URLSearchParams(raw).get('user')||'null'); if(u&&u.id) myTgId=u.id; }
+  }catch(e){}
   // 2: initDataUnsafe
   if(!myTgId){ try{ const u=_tg?.initDataUnsafe?.user; if(u&&u.id) myTgId=u.id; }catch(e){} }
-  // 3: URL param ?tg_id=
+  // 3: URL ?tg_id=
   if(!myTgId){ try{ const v=parseInt(new URLSearchParams(location.search).get('tg_id')||''); if(v>0) myTgId=v; }catch(e){} }
-  // 4: hash #NUMBER
-  if(!myTgId){ try{ const v=parseInt(location.hash.replace(/[^0-9]/g,'')||''); if(v>0) myTgId=v; }catch(e){} }
+  // 4: hash #tg_id или просто #NUMBER
+  if(!myTgId){ try{ const h=location.hash.replace('#',''); const v=parseInt(h); if(v>0) myTgId=v; }catch(e){} }
 
   console.log('[INIT] tg_id='+myTgId);
 
@@ -678,33 +671,37 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     else{ _showBlocked(); return; }
   }
 
-  // ── Сразу показываем меню, профиль грузим фоном ──
-  myNick = 'Player'+String(myTgId).slice(-5);
-  myBalance = 0;
+  // ── Загружаем профиль ДО показа меню ──
+  setLoading('⏳ Загружаем информацию об игроке...');
+  let loaded=false;
+  for(let i=0;i<4;i++){
+    try{
+      await loadProfile();
+      loaded=true;
+      break;
+    }catch(e){
+      console.warn('[INIT] attempt '+(i+1)+' fail:',e.message);
+      if(i<3){
+        setLoading('⏳ Загружаем информацию об игроке... ('+(i+2)+'/4)');
+        await new Promise(r=>setTimeout(r,1500));
+      }
+    }
+  }
+  if(!loaded){
+    // Всё равно пускаем с авто-ником
+    myNick='Player'+String(myTgId).slice(-5);
+    myBalance=1000;
+    toast('⚠️ Нет связи — временный режим');
+  }
+
   initButtons();
   showScreen('menu');
   updateNickUI(); updateBalanceUI();
-
-  // Загрузить реальный профиль (сервер автосоздаёт)
-  loadProfileBackground();
+  toast('💰 '+myNick+' · $'+myBalance);
 
   document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') refreshBalance(); });
-  setInterval(refreshBalance,30000);
+  setInterval(refreshBalance,60000);
 });
-
-async function loadProfileBackground(){
-  for(let attempt=0;attempt<5;attempt++){
-    try{
-      await loadProfile();
-      console.log('[BG] profile loaded ok');
-      return;
-    }catch(e){
-      console.warn('[BG] attempt '+(attempt+1)+' fail: '+e.message);
-      await new Promise(r=>setTimeout(r,2000*(attempt+1)));
-    }
-  }
-  console.error('[BG] all attempts failed');
-}
 
 // Показать экран блокировки с нужным username бота
 function _showBlocked(msg){
@@ -767,7 +764,10 @@ function initButtons(){
 function openGame(game){
   pName=myNick||'Игрок';
   curGame=game;
-  if(game==='blackjack'){ bjBal=myBalance; bjInit(); showScreen('blackjack'); return; }
+  if(game==='blackjack'){
+    bjBal=myBalance>0?myBalance:1000;
+    bjInit(); showScreen('blackjack'); return;
+  }
   if(game==='dice'){ cfInit(); showScreen('dice'); return; }
   $('roomsTitle').textContent=game==='poker'?'🃏 Покер':'🂮 Дурак';
   showScreen('rooms'); loadRooms();
