@@ -2,19 +2,17 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
 <title>Casino Night</title>
 <meta name="theme-color" content="#0a1a0f">
-<script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <meta name="apple-mobile-web-app-capable" content="yes">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<!-- Шрифты загружаются асинхронно — не блокируют init -->
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&display=swap" onload="this.rel='stylesheet'">
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&display=swap"></noscript>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&display=swap&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#0a1a0f;--gold:#c8a84b;--gold2:#edd880;--gold3:#f5e9b0;--red:#cc2233;--card:#faf7f0;--text:#e2d5b8;--dim:#6b5e42}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
@@ -307,7 +305,7 @@ html,body{height:100%;background:var(--bg);font-family:Georgia,'Times New Roman'
   <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:20px">
     <div style="font-family:'Cinzel',serif;font-size:32px;color:var(--gold);letter-spacing:4px">🎰</div>
     <div style="font-family:'Cinzel',serif;font-size:20px;color:var(--gold);letter-spacing:3px">CASINO NIGHT</div>
-    <div style="color:var(--dim);font-size:14px;letter-spacing:2px;animation:fadeInUp .5s .3s both" id="loadingMsg">Загрузка...</div>
+    <div style="color:var(--dim);font-size:14px;letter-spacing:2px;animation:fadeInUp .5s .3s both" id="loadingMsg">v4 · Подключение...</div>
     <div style="width:40px;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);animation:loadBar 1.5s ease-in-out infinite;margin-top:8px"></div>
     <style>@keyframes loadBar{0%,100%{opacity:.2;transform:scaleX(.3)}50%{opacity:1;transform:scaleX(1)}}</style>
   </div>
@@ -638,141 +636,82 @@ async function refreshBalance(){
 }
 
 // ── ИНИЦИАЛИЗАЦИЯ ──
-// Запускаем сразу когда DOM готов, НЕ ждём внешние ресурсы
-function _startApp(){
-  if(window._appStarted) return; window._appStarted=true;
-  (async()=>{
-  showScreen('loading');
-  setLoading('Подключение к Telegram...');
+// Сносим service worker чтобы он не отдавал старый кэш
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.getRegistrations().then(regs=>regs.forEach(r=>r.unregister())).catch(()=>{});
+}
 
-  // ── Получить tg_id ──────────────────────────────────────
-  // Telegram WebApp script уже загружен в <head>
-  // Порядок: initData parse → initDataUnsafe → URL param
+// DOMContentLoaded — не ждём шрифты/картинки/внешние скрипты
+document.addEventListener('DOMContentLoaded', async ()=>{
+  // Защита: если за 12 секунд ничего — показать кнопку перезагрузки
+  const _bail=setTimeout(()=>{
+    const lm=document.getElementById('loadingMsg');
+    if(lm) lm.innerHTML='⏱ Загрузка зависла<br><br>'
+      +'<button onclick="location.reload()" style="margin-top:10px;padding:12px 28px;'
+      +'background:#c8a84b;color:#1a0e00;border:none;border-radius:10px;font-size:15px;cursor:pointer">'
+      +'🔄 Нажми сюда</button>';
+  }, 12000);
 
-  const _tg = window.Telegram?.WebApp;
-  if(_tg){
-    _tg.ready();
-    try{ _tg.expand(); }catch(e){}
-  }
-
-  // Способ 1: парсим initData напрямую (самый надёжный)
   try{
-    const raw = _tg?.initData || '';
-    if(raw){
-      const params = new URLSearchParams(raw);
-      const userStr = params.get('user');
-      if(userStr){
-        const user = JSON.parse(userStr);
-        if(user?.id){ myTgId = user.id; console.log('[TG] tg_id from initData:', myTgId); }
-      }
-    }
-  }catch(e){ console.warn('[TG] initData parse error:', e); }
+    showScreen('loading');
+    setLoading('Подключение...');
 
-  // Способ 2: initDataUnsafe.user
-  if(!myTgId){
-    const u = _tg?.initDataUnsafe?.user;
-    if(u?.id){ myTgId = u.id; console.log('[TG] tg_id from initDataUnsafe:', myTgId); }
-  }
+    // Получить tg_id
+    const _tg = window.Telegram?.WebApp;
+    if(_tg){ try{_tg.ready();_tg.expand();}catch(e){} }
 
-  // Способ 3: URL параметр ?tg_id=X (бот добавляет в ссылку)
-  if(!myTgId){
-    const up = new URLSearchParams(location.search);
-    const uid = parseInt(up.get('tg_id') || '0');
-    if(uid){ myTgId = uid; console.log('[TG] tg_id from URL param:', myTgId); }
-  }
-
-  // Способ 4: URL hash #tg_id=X
-  if(!myTgId){
-    const hp = new URLSearchParams(location.hash.replace('#',''));
-    const hid = parseInt(hp.get('tg_id') || '0');
-    if(hid){ myTgId = hid; console.log('[TG] tg_id from hash:', myTgId); }
-  }
-
-  // Способ 5: отправить initData на сервер, он распарсит и вернёт tg_id
-  if(!myTgId && (_tg?.initData||'').length > 10){
+    // 1: initData строка
     try{
-      setLoading('Авторизация...');
-      const vd = await apiFetch('/api/validate', {
-        method: 'POST',
-        body: JSON.stringify({initData: _tg.initData})
-      });
-      if(vd.tg_id){ myTgId = vd.tg_id; console.log('[TG] tg_id from server validate:', myTgId);
-        if(vd.exists){ myNick=vd.nickname; myBalance=vd.balance; } }
-    }catch(e){ console.warn('[TG] server validate error:', e); }
-  }
-
-  console.log('[TG] Final tg_id:', myTgId,
-    '| initData len:', (_tg?.initData||'').length,
-    '| window.Telegram:', !!window.Telegram);
-
-  // ─────────────────────────────────────────────────────────
-  if(!myTgId){
-    if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){
-      myTgId = 999999999; console.warn('[DEV] fake tg_id');
-    } else {
-      _showBlocked(''); return;
-    }
-  }
-
-  // Шаг 3: проверить регистрацию на сервере
-  setLoading('Загрузка профиля...');
-  let exists = !!(myNick && myBalance >= 0); // уже получили через /api/validate
-  if(!exists){
-    let tries=0;
-    while(!exists && tries<3){
-      try{
-        exists = await loadProfile();
-        break;
-      } catch(e){
-        tries++;
-        console.warn('[INIT] loadProfile attempt', tries, e.message);
-        if(tries<3){
-          setLoading('Соединение... попытка '+(tries+1)+'/3');
-          await new Promise(r=>setTimeout(r,2000));
-        } else {
-          setLoading('⚠️ Сервер не отвечает. Нажми кнопку ниже.');
-          // Показать кнопку retry вместо вечной загрузки
-          const lm=$('loadingMsg');
-          if(lm){
-            lm.innerHTML='⚠️ Сервер недоступен<br><br>'
-              +'<button onclick="location.reload()" style="'
-              +'margin-top:8px;padding:10px 24px;background:var(--gold);color:#1a0e00;'
-              +'border:none;border-radius:10px;font-family:Cinzel,serif;font-size:14px;cursor:pointer">'
-              +'🔄 Попробовать снова</button>';
-          }
-          return;
-        }
+      const raw=_tg?.initData||'';
+      if(raw){
+        const u=JSON.parse(new URLSearchParams(raw).get('user')||'null');
+        if(u?.id){ myTgId=u.id; console.log('[TG] initData:',myTgId); }
       }
+    }catch(e){}
+
+    // 2: initDataUnsafe
+    if(!myTgId){ const u=_tg?.initDataUnsafe?.user; if(u?.id){myTgId=u.id;console.log('[TG] unsafe:',myTgId);} }
+
+    // 3: URL ?tg_id=
+    if(!myTgId){ const v=parseInt(new URLSearchParams(location.search).get('tg_id')||'0'); if(v){myTgId=v;console.log('[TG] url:',myTgId);} }
+
+    // 4: hash #NUMBER
+    if(!myTgId){ const v=parseInt(location.hash.replace('#','')||'0'); if(v){myTgId=v;console.log('[TG] hash:',myTgId);} }
+
+    console.log('[TG] tg_id=',myTgId,'Telegram=',!!window.Telegram);
+
+    if(!myTgId){
+      if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){ myTgId=999999999; }
+      else{ clearTimeout(_bail); _showBlocked(''); return; }
     }
+
+    // Загрузить профиль
+    setLoading('Загрузка...');
+    let exists=false;
+    try{ exists=await loadProfile(); }catch(e){
+      console.error('[INIT] loadProfile:',e);
+    }
+
+    clearTimeout(_bail);
+    if(!exists){ _showBlocked(null); return; }
+
+    showScreen('menu');
+    updateNickUI(); updateBalanceUI();
+    toast('💰 '+myNick+' · $'+myBalance);
+    document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible')refreshBalance(); });
+    setInterval(refreshBalance,30000);
+    initButtons();
+
+  }catch(e){
+    clearTimeout(_bail);
+    console.error('[INIT] fatal:',e);
+    const lm=document.getElementById('loadingMsg');
+    if(lm) lm.innerHTML='❌ '+e.message+'<br><br>'
+      +'<button onclick="location.reload()" style="margin-top:10px;padding:12px 28px;'
+      +'background:#c8a84b;color:#1a0e00;border:none;border-radius:10px;font-size:15px;cursor:pointer">'
+      +'🔄 Перезагрузить</button>';
   }
-
-  // Шаг 4: не зарегистрирован — показать экран блокировки
-  if(!exists){
-    _showBlocked(null);
-    return;
-  }
-
-  // Шаг 5: всё OK — показать меню
-  showScreen('menu');
-  updateNickUI(); updateBalanceUI();
-  toast('💰 '+myNick+' · $'+myBalance);
-
-  // Слушать возврат в приложение → обновить баланс
-  document.addEventListener('visibilitychange',()=>{
-    if(document.visibilityState==='visible') refreshBalance();
-  });
-  setInterval(refreshBalance, 30000);
-
-  initButtons();
-  if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
-  })();
-}
-// Запускаем как только возможно — не ждём шрифты/внешние скрипты
-if(document.readyState==='loading'){
-  document.addEventListener('DOMContentLoaded', _startApp);
-} else {
-  _startApp(); // DOM уже готов
-}
+});
 
 // Показать экран блокировки с нужным username бота
 function _showBlocked(msg){
@@ -1344,11 +1283,7 @@ function dkRecvState(s){
     const title=myRank===1?'Победа!':myRank===2?'2-е место!':isLoser?'Ты Дурак! 🤣':'Игра окончена';
     const sub=myPrize>0?'+$'+myPrize:isLoser?'Дурак платит позор 😅':'$0';
     const n1=finOrder[0]||'',n2=finOrder[1]||'';
-    const detail=(n1?'🏆 '+n1+(prizes[n1]?' +$'+prizes[n1]:'')+'
-':'')
-                +(n2&&n2!==s.loserName?'🥈 '+n2+(prizes[n2]?' +$'+prizes[n2]:'')+'
-':'')
-                +(s.loserName?'🤣 Дурак: '+s.loserName:'');
+    const detail=(n1?'🏆 '+n1+(prizes[n1]?' +$'+prizes[n1]:'')+'\n':'')+(n2&&n2!==s.loserName?'🥈 '+n2+(prizes[n2]?' +$'+prizes[n2]:'')+'\n':'')+(s.loserName?'🤣 Дурак: '+s.loserName:'');
     setTimeout(()=>showWinner(emoji,title,sub,detail),500);
     return;
   }
@@ -1542,11 +1477,7 @@ function dkCheckWin(s){
     const title=myRank===1?'Победа!':myRank===2?'2-е место!':isLoser?'Ты Дурак! 🤣':'Игра окончена';
     const sub=myPrize>0?'+$'+myPrize:(isLoser?'Дурак платит позор 😅':'$0');
     const n1=s.finishOrder[0]||'';const n2=s.finishOrder[1]||'';
-    const detail=(n1?'🏆 '+n1+(prizes[n1]?' +$'+prizes[n1]:'')+'
-':'')
-                +(n2&&n2!==loserName?'🥈 '+n2+(prizes[n2]?' +$'+prizes[n2]:'')+'
-':'')
-                +(loserName?'🤣 Дурак: '+loserName:'');
+    const detail=(n1?'🏆 '+n1+(prizes[n1]?' +$'+prizes[n1]:'')+'\n':'')+(n2&&n2!==loserName?'🥈 '+n2+(prizes[n2]?' +$'+prizes[n2]:'')+'\n':'')+(loserName?'🤣 Дурак: '+loserName:'');
     setTimeout(()=>showWinner(emoji,title,sub,detail),400);
     return true;
   }
