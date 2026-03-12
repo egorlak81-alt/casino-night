@@ -649,51 +649,62 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   showScreen('loading');
   setLoading('Подключение...');
 
-  // ── Получить tg_id ──────────────────────────────
+  // ── Ждём загрузку Telegram SDK (макс 2 сек) ──
+  for(let i=0;i<20&&!window.Telegram?.WebApp?.initData;i++)
+    await new Promise(r=>setTimeout(r,100));
+
   const _tg = window.Telegram?.WebApp;
   if(_tg){ try{_tg.ready();_tg.expand();}catch(e){} }
 
-  // 1: initData
+  // 1: initData parse
   try{
     const raw=_tg?.initData||'';
-    if(raw){ const u=JSON.parse(new URLSearchParams(raw).get('user')||'null'); if(u?.id) myTgId=u.id; }
-  }catch(e){}
+    if(raw){
+      const userStr=new URLSearchParams(raw).get('user');
+      if(userStr){ const u=JSON.parse(userStr); if(u&&u.id) myTgId=u.id; }
+    }
+  }catch(e){ console.warn('[TG1]',e.message); }
   // 2: initDataUnsafe
-  if(!myTgId){ const u=_tg?.initDataUnsafe?.user; if(u?.id) myTgId=u.id; }
-  // 3: URL ?tg_id=
-  if(!myTgId){ const v=parseInt(new URLSearchParams(location.search).get('tg_id')||'0'); if(v) myTgId=v; }
+  if(!myTgId){ try{ const u=_tg?.initDataUnsafe?.user; if(u&&u.id) myTgId=u.id; }catch(e){} }
+  // 3: URL param ?tg_id=
+  if(!myTgId){ try{ const v=parseInt(new URLSearchParams(location.search).get('tg_id')||''); if(v>0) myTgId=v; }catch(e){} }
   // 4: hash #NUMBER
-  if(!myTgId){ const v=parseInt(location.hash.replace('#','')||'0'); if(v) myTgId=v; }
+  if(!myTgId){ try{ const v=parseInt(location.hash.replace(/[^0-9]/g,'')||''); if(v>0) myTgId=v; }catch(e){} }
 
-  console.log('[INIT] tg_id='+myTgId+' tg='+!!window.Telegram);
+  console.log('[INIT] tg_id='+myTgId);
 
   if(!myTgId){
     if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){ myTgId=999999999; }
     else{ _showBlocked(); return; }
   }
 
-  // ── Загрузить профиль (сервер автосоздаёт если нет) ──
-  setLoading('Загрузка...');
-  try{
-    await loadProfile();
-  }catch(e){
-    console.error('[INIT] loadProfile fail:',e.message);
-    // Показать кнопку retry вместо вечной загрузки
-    const lm=document.getElementById('loadingMsg');
-    if(lm) lm.innerHTML='⚠️ Нет связи с сервером<br><br>'
-      +'<button onclick="location.reload()" style="margin-top:10px;padding:12px 28px;'
-      +'background:#c8a84b;color:#1a0e00;border:none;border-radius:10px;font-size:15px;cursor:pointer">'
-      +'🔄 Повторить</button>';
-    return;
-  }
-
+  // ── Сразу показываем меню, профиль грузим фоном ──
+  myNick = 'Player'+String(myTgId).slice(-5);
+  myBalance = 0;
+  initButtons();
   showScreen('menu');
   updateNickUI(); updateBalanceUI();
-  toast('💰 '+myNick+' · $'+myBalance);
+
+  // Загрузить реальный профиль (сервер автосоздаёт)
+  loadProfileBackground();
+
   document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') refreshBalance(); });
   setInterval(refreshBalance,30000);
-  initButtons();
 });
+
+async function loadProfileBackground(){
+  for(let attempt=0;attempt<5;attempt++){
+    try{
+      await loadProfile();
+      console.log('[BG] profile loaded ok');
+      return;
+    }catch(e){
+      console.warn('[BG] attempt '+(attempt+1)+' fail: '+e.message);
+      await new Promise(r=>setTimeout(r,2000*(attempt+1)));
+    }
+  }
+  console.error('[BG] all attempts failed');
+}
 
 // Показать экран блокировки с нужным username бота
 function _showBlocked(msg){
