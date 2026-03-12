@@ -15,7 +15,7 @@
 :root{--bg:#0a1a0f;--gold:#c8a84b;--gold2:#edd880;--gold3:#f5e9b0;--red:#cc2233;--card:#faf7f0;--text:#e2d5b8;--dim:#6b5e42}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;color:var(--text);overflow:hidden}
-.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;overflow-y:auto;transition:opacity .3s,transform .3s}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;overflow-y:auto;transition:opacity .25s,transform .25s;contain:layout style}
 .screen.hidden{opacity:0;pointer-events:none;transform:translateY(12px)}
 /* MENU */
 #menu{background:radial-gradient(ellipse at 50% 0%,#1a3520 0%,var(--bg) 65%);padding:0 20px 30px}
@@ -42,6 +42,7 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
 .lstitle{font-size:11px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;margin-bottom:12px}
 .btn{display:block;width:100%;padding:13px;border:none;border-radius:10px;font-family:'Cinzel',serif;font-size:14px;font-weight:600;letter-spacing:1px;cursor:pointer;transition:all .2s;margin-bottom:10px}
 .btn:last-child{margin-bottom:0}
+.btn:active{transform:scale(.97);opacity:.9}
 .btn-g{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#1a0e00}
 .btn-o{background:transparent;border:1px solid rgba(200,168,75,.3);color:var(--gold)}
 .btn-b{background:rgba(255,255,255,.05);color:var(--dim);border:1px solid rgba(255,255,255,.1);font-size:12px;padding:10px}
@@ -57,7 +58,7 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
 .bk{position:fixed;top:12px;left:12px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 12px;color:var(--dim);font-size:13px;cursor:pointer;z-index:50;font-family:'Cinzel',serif}
 .bk:active{color:var(--gold)}
 /* CARD */
-.card{background:var(--card);border-radius:8px;border:1px solid #d0c8b0;box-shadow:2px 3px 10px rgba(0,0,0,.5);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;font-family:'Cinzel',serif;font-weight:700;flex-shrink:0}
+.card{background:var(--card);border-radius:8px;border:1px solid #d0c8b0;box-shadow:2px 3px 10px rgba(0,0,0,.5);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;font-family:'Cinzel',serif;font-weight:700;flex-shrink:0;transform:translateZ(0);will-change:transform}
 .card.red{color:var(--red)}.card.black{color:#1a1008}
 .card .tl{position:absolute;top:4px;left:5px;font-size:11px;line-height:1.1}
 .card .br{position:absolute;bottom:4px;right:5px;font-size:11px;line-height:1.1;transform:rotate(180deg)}
@@ -187,15 +188,21 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
 .dk-mr.att{color:#ff8888}.dk-mr.def{color:#88aaff}
 .dk-hand{display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;min-height:68px}
 .dkhc{width:42px;height:62px;flex-shrink:0;cursor:pointer}
-.dkhc.selected{transform:translateY(-10px);box-shadow:0 8px 16px rgba(200,168,75,.5)}
+.dkhc.selected{transform:translateY(-10px);box-shadow:0 8px 20px rgba(200,168,75,.7);border-color:var(--gold) !important}
 .dk-acts{display:flex;gap:8px;margin-top:8px}
 /* WINNER */
-.wov{position:fixed;inset:0;background:rgba(0,0,0,.82);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200;gap:12px;backdrop-filter:blur(6px)}
+.wov{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200;gap:12px}
 .wov.hidden{display:none}
-.we{font-size:60px;animation:pop .4s cubic-bezier(.34,1.56,.64,1)}
+.we{font-size:72px;animation:pop .4s cubic-bezier(.34,1.56,.64,1);filter:drop-shadow(0 0 20px rgba(200,168,75,.6))}
 @keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}
 .wt{font-family:'Cinzel',serif;font-size:34px;color:var(--gold);text-align:center;animation:gl 1.5s infinite alternate}
 @keyframes gl{from{text-shadow:0 0 10px rgba(200,168,75,.3)}to{text-shadow:0 0 40px rgba(200,168,75,.9)}}
+@keyframes dealIn{from{opacity:0;transform:translateY(-18px) scale(.88)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes cardFlip{0%{transform:rotateY(90deg) scale(.9)}100%{transform:rotateY(0deg) scale(1)}}
+.card-deal{animation:dealIn .25s cubic-bezier(.34,1.3,.64,1) both}
+.card-flip{animation:cardFlip .2s ease-out both}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{animation:fadeUp .3s ease-out both}
 .ws{font-family:'Cinzel',serif;font-size:18px;color:var(--gold2);text-align:center}
 .wd{color:var(--dim);font-style:italic;font-size:15px;text-align:center}
 .wc{display:flex;gap:8px;justify-content:center}
@@ -222,6 +229,57 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:rgba(20,40,25,.95);border:1px solid rgba(200,168,75,.3);border-radius:20px;padding:10px 20px;font-size:14px;color:var(--text);white-space:nowrap;z-index:300;opacity:0;transition:all .3s;pointer-events:none}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 ::-webkit-scrollbar{display:none}
+/* ── PERFORMANCE ── */
+.gc,.btn,.chip,.ab,.dkhc,.coin-btn{transform:translateZ(0);will-change:transform}
+.screen{contain:layout style}
+.bj-cards,.pk-comm,.pk-hand,.dk-hand,.dk-table{transform:translateZ(0)}
+/* Reduce paint on non-critical transitions */
+.room-card,.gc{transition:transform .15s,background .15s}
+/* ── ANIMATIONS ── */
+@keyframes balFlash{0%{color:var(--gold)}50%{color:#7fff7f}100%{color:var(--gold)}}
+@keyframes balFlashLoss{0%{color:var(--gold)}50%{color:#ff7f7f}100%{color:var(--gold)}}
+.bal-flash{animation:balFlash .5s ease-out}
+.bal-flash-loss{animation:balFlashLoss .5s ease-out}
+@keyframes slideIn{from{transform:translateX(-12px);opacity:0}to{transform:translateX(0);opacity:1}}
+.prow{animation:slideIn .2s ease-out both}
+/* Better selected card glow */
+.card.selected{transform:translateY(-10px);box-shadow:0 12px 24px rgba(200,168,75,.6) !important;border-color:var(--gold) !important}
+/* Winner overlay entrance */
+.wov:not(.hidden) .we,.wov:not(.hidden) .wt,.wov:not(.hidden) .ws{animation:fadeUp .3s ease-out both}
+.wov:not(.hidden) .wt{animation-delay:.1s}
+.wov:not(.hidden) .ws{animation-delay:.2s}
+
+/* ══ PERFORMANCE & ANIMATION ══ */
+/* Экраны: плавный переход */
+.screen{contain:layout style;transform:translateZ(0)}
+.screen.hidden{display:none!important}
+.screen.fade-in{animation:fadeInUp .22s ease both}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+/* Карты: будем анимировать только этот класс */
+.card-deal{animation:dealCard .18s ease both}
+@keyframes dealCard{from{opacity:0;transform:scale(.7) rotate(-8deg)}to{opacity:1;transform:scale(1) rotate(0)}}
+
+/* Баланс: мигает при изменении */
+.bal-flash{animation:balFlash .4s ease}
+@keyframes balFlash{0%{color:var(--gold)}30%{color:#44ee77;transform:scale(1.1)}100%{color:var(--gold);transform:scale(1)}}
+.bal-flash-loss{animation:balFlashLoss .4s ease}
+@keyframes balFlashLoss{0%{color:var(--gold)}30%{color:#ff5555;transform:scale(1.1)}100%{color:var(--gold);transform:scale(1)}}
+
+/* Кнопки: микро-тактильный отклик */
+.btn{transition:transform .12s,opacity .12s;will-change:transform}
+.btn:active{transform:scale(.96)!important;opacity:.85}
+.gc{transition:transform .15s,box-shadow .15s;will-change:transform}
+.gc:active{transform:scale(.94)!important}
+
+/* Покер/Дурак карты */
+.card{will-change:transform;transition:box-shadow .15s}
+.dkhc.selected{transform:translateY(-12px);box-shadow:0 8px 24px rgba(200,168,75,.6)}
+
+/* Лобби: пульс ожидания */
+.cdtimer{will-change:contents}
+.pdot{background:#44cc77;animation:pdotPulse 2s ease-in-out infinite}
+@keyframes pdotPulse{0%,100%{opacity:.4;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}
 
 /* COIN FLIP */
 .coin-wrap{display:flex;flex-direction:column;align-items:center;width:100%;height:100%;padding:10px 20px 20px;gap:10px;overflow-y:auto}
@@ -232,11 +290,12 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
 .coin-3d{width:140px;height:140px;position:relative;transform-style:preserve-3d;transition:transform 0.1s}
 .coin-3d.flipping{animation:coinSpin 1.2s cubic-bezier(.4,0,.2,1) forwards}
 @keyframes coinSpin{
-  0%{transform:rotateY(0) scale(1)}
-  20%{transform:rotateY(720deg) scale(1.15)}
-  60%{transform:rotateY(1440deg) scale(1.1)}
-  80%{transform:rotateY(1800deg) scale(1.05)}
-  100%{transform:rotateY(1980deg) scale(1)}
+  0%{transform:rotateY(0deg) scale(1);filter:brightness(1)}
+  15%{transform:rotateY(540deg) scale(1.2);filter:brightness(1.3)}
+  40%{transform:rotateY(1080deg) scale(1.15);filter:brightness(1.2)}
+  65%{transform:rotateY(1620deg) scale(1.1);filter:brightness(1.1)}
+  85%{transform:rotateY(1890deg) scale(1.03)}
+  100%{transform:rotateY(1980deg) scale(1);filter:brightness(1)}
 }
 .coin-3d.show-heads{transform:rotateY(0deg)}
 .coin-3d.show-tails{transform:rotateY(180deg)}
@@ -266,7 +325,9 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
   <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:20px">
     <div style="font-family:'Cinzel',serif;font-size:32px;color:var(--gold);letter-spacing:4px">🎰</div>
     <div style="font-family:'Cinzel',serif;font-size:20px;color:var(--gold);letter-spacing:3px">CASINO NIGHT</div>
-    <div style="color:var(--dim);font-size:14px" id="loadingMsg">Загрузка...</div>
+    <div style="color:var(--dim);font-size:14px;letter-spacing:2px;animation:fadeInUp .5s .3s both" id="loadingMsg">Загрузка...</div>
+    <div style="width:40px;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);animation:loadBar 1.5s ease-in-out infinite;margin-top:8px"></div>
+    <style>@keyframes loadBar{0%,100%{opacity:.2;transform:scaleX(.3)}50%{opacity:1;transform:scaleX(1)}}</style>
   </div>
 </div>
 
@@ -488,7 +549,10 @@ let curGame=null;
 
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
-  $(id).classList.remove('hidden');
+  const el=$(id);el.classList.remove('hidden');
+  el.classList.remove('fade-in');
+  void el.offsetWidth; // force reflow
+  el.classList.add('fade-in');
 }
 function setLoading(msg){ if($('loadingMsg')) $('loadingMsg').textContent=msg; }
 function toast(msg,dur=2500){
@@ -496,21 +560,29 @@ function toast(msg,dur=2500){
   setTimeout(()=>t.classList.remove('show'),dur);
 }
 function showWinner(e,t,s,d='',cards=[]){
-  $('wE').textContent=e;$('wT').textContent=t;$('wS').textContent=s;$('wD').textContent=d;
-  $('wC').innerHTML=cards.filter(Boolean).map(cv=>rc(cv,'wcrd')).join('');
+  $('wE').textContent=e;$('wT').textContent=t;$('wS').textContent=s;
+  const detEl=$('wD');
+  if(d&&d.includes('\n')){
+    detEl.innerHTML=d.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>`<div style="margin:2px 0">${l}</div>`).join('');
+  } else {detEl.textContent=d||'';}
+  $('wC').innerHTML=cards.filter(Boolean).map(cv=>rc(cv,'wcrd','card-flip')).join('');
   $('wov').classList.remove('hidden');
 }
 
 // ── Обновить все отображения баланса ──
+let _prevBal=0;
 function updateBalanceUI(){
   const s='$'+myBalance;
-  if($('bjBal'))  $('bjBal').textContent=myBalance;
+  const cls=myBalance>_prevBal?'bal-flash':myBalance<_prevBal?'bal-flash-loss':'';
+  const flash=el=>{if(!el||!cls)return;el.classList.remove('bal-flash','bal-flash-loss');
+    void el.offsetWidth;el.classList.add(cls);};
+  if($('bjBal')){$('bjBal').textContent=myBalance;flash($('bjBal'));}
   if($('bjTot'))  $('bjTot').textContent=myBalance;
-  if($('pkBal'))  $('pkBal').textContent=s;
-  if($('dkBal'))  $('dkBal').textContent=s;
-  if($('coinBal'))$('coinBal').textContent=s;
-  if($('menuBal'))$('menuBal').textContent=s;
-  bjBal=myBalance;
+  if($('pkBal')){$('pkBal').textContent=s;flash($('pkBal'));}
+  if($('dkBal')){$('dkBal').textContent=s;flash($('dkBal'));}
+  if($('coinBal')){$('coinBal').textContent=s;flash($('coinBal'));}
+  if($('menuBal')){$('menuBal').textContent=s;flash($('menuBal'));}
+  _prevBal=myBalance;bjBal=myBalance;
 }
 function updateNickUI(){
   if($('pNameDisplay')) $('pNameDisplay').textContent=myNick||'—';
@@ -562,8 +634,10 @@ async function syncBalance(delta){
   return myBalance;
 }
 
+let _lastRefresh=0;
 async function refreshBalance(){
   if(!myTgId) return;
+  const now=Date.now();if(now-_lastRefresh<5000)return;_lastRefresh=now;
   try{
     const d=await apiFetch(`/api/balance?tg_id=${myTgId}`);
     myBalance=d.balance; myNick=d.nickname||myNick;
@@ -739,10 +813,10 @@ function openGame(game){
 function makeDeck(n=1){const d=[];for(let i=0;i<n;i++)for(const s of SUITS)for(const r of RANKS)d.push({r,s});return shuf(d);}
 function makeDkDeck(){const d=[];['6','7','8','9','10','J','Q','K','A'].forEach(r=>SUITS.forEach(s=>d.push({r,s})));return shuf(d);}
 function shuf(a){for(let i=a.length-1;i>0;i--){const j=0|Math.random()*(i+1);[a[i],a[j]]=[a[j],a[i]];}return a;}
-function rc(card,cls=''){
+function rc(card,cls='',anim=''){
   if(!card)return`<div class="cback ${cls}"></div>`;
   const col=(card.s==='♥'||card.s==='♦')?'red':'black';
-  return`<div class="card ${col} ${cls}"><div class="tl">${card.r}<br>${card.s}</div><div class="cs">${card.s}</div><div class="br">${card.r}<br>${card.s}</div></div>`;
+  return`<div class="card ${col} ${cls} ${anim}"><div class="tl">${card.r}<br>${card.s}</div><div class="cs">${card.s}</div><div class="br">${card.r}<br>${card.s}</div></div>`;
 }
 
 // ── ROOM STATE ──
@@ -815,7 +889,11 @@ async function leaveRoom(){
   const rid=curRoomId;curRoomId=null;gameStarted=false;
   try{await fetch(`${SERVER}/api/rooms/leave`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room_id:rid,uid:getUid()})});}catch(e){}
 }
-function startPolling(){stopPolling();pollTimer=setInterval(doPoll,2000);doPoll();}
+function startPolling(fast=false){
+  stopPolling();
+  pollTimer=setInterval(doPoll,fast?1200:2500);
+  doPoll();
+}
 function stopPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}
 async function doPoll(){
   if(!curRoomId)return;
@@ -829,7 +907,7 @@ async function doPoll(){
     if(data.started&&!gameStarted){
       gameStarted=true;stopPolling();
       if(isHost)hostStart();
-      pollTimer=setInterval(doPoll,1500);
+      pollTimer=setInterval(doPoll,1000); // быстро в игре
     }
     if(isHost&&data.actions)for(const a of data.actions){if(a.seq>lastActSeq){lastActSeq=a.seq;onHost(a.data);}}
     if(!isHost&&data.messages)for(const m of data.messages){if(m.seq>lastMsgSeq){lastMsgSeq=m.seq;onClient(m.data);}}
@@ -881,9 +959,9 @@ function bjDeal(){
   $('bjSt').textContent='Ваш ход';
 }
 function bjRendC(hd=false){
-  $('bjDC').innerHTML=bjDl.map((c,i)=>i===1&&hd?`<div class="cback bjc"></div>`:rc(c,'bjc')).join('');
+  $('bjDC').innerHTML=bjDl.map((c,i)=>i===1&&hd?`<div class="cback bjc card-deal"></div>`:rc(c,'bjc card-deal')).join('');
   $('bjDS').textContent=hd?'?':bjSc(bjDl);
-  $('bjPC').innerHTML=bjP.map(c=>rc(c,'bjc')).join('');
+  $('bjPC').innerHTML=bjP.map(c=>rc(c,'bjc card-deal')).join('');
   $('bjPS').textContent=bjSc(bjP);
 }
 function bjHit(){bjP.push(bjD.pop());bjRendC(true);const s=bjSc(bjP);if(s>21)bjEnd('bust');else if(s===21)bjStand();$('bjDbl').disabled=true;}
@@ -1046,8 +1124,16 @@ function pkRecvState(s){
   if(s.winnerName&&!pkGameOver){
     pkGameOver=true;
     const isW=s.winnerName===pName;
-    if(isW){syncBalance(+s.winnerChips);setTimeout(()=>showWinner('🏆',s.winnerName+' побеждает!','+$'+s.winnerChips,s.handName||'',s.winnerHand||[]),500);}
-    else setTimeout(()=>showWinner('😔',s.winnerName+' побеждает!','Вы проиграли $'+(s.stk||curBuyin),s.handName||''),500);
+    const myFinal=(s.playerFinals&&s.playerFinals[pName])||0;
+    if(isW){
+      syncBalance(+s.winnerChips);
+      const net=s.winnerChips-(s.stk||curBuyin);
+      setTimeout(()=>showWinner('🏆',s.winnerName+' побеждает!','+'+(net>=0?'$'+net:'$0'),s.handName||'',s.winnerHand||[]),500);
+    } else {
+      syncBalance(+myFinal); // вернуть оставшиеся чипы
+      const lost=(s.stk||curBuyin)-myFinal;
+      setTimeout(()=>showWinner('😔',s.winnerName+' побеждает!','Вы проиграли $'+Math.max(0,lost),s.handName||''),500);
+    }
     return;
   }
   pkRend();
@@ -1056,7 +1142,12 @@ function pkSan(st){
   const hands=Object.fromEntries(st.players.map(p=>[p.name,p.hand]));
   return{...st,players:st.players.map(p=>({...p,hand:Array(p.hand.length).fill(null)})),deck:[],hands};
 }
-function pkBC(){pkRend();bc({type:'gs',s:pkSan(pkSt)});}
+let _pkRafPending=false;
+function pkBC(){
+  if(!_pkRafPending){_pkRafPending=true;requestAnimationFrame(()=>{_pkRafPending=false;pkRend();});}
+  bc({type:'gs',s:pkSan(pkSt)});
+}
+let _pkRendKey='';
 function pkRend(){
   if(!pkSt)return;
   const me=pkSt.players[myPkI];
@@ -1134,10 +1225,25 @@ function pkShowdown(){
 function pkFinish(win){
   pkGameOver=true;
   const hName=pkHandName(win.hand,pkSt.comm);
-  const ws={...pkSan(pkSt),winnerName:win.name,winnerChips:win.chips,winnerHand:win.hand,handName:hName,stk:pkSt.stk};
+  // Сохраняем финальные чипы каждого игрока чтобы вернуть правильно
+  const playerFinals={};
+  pkSt.players.forEach(p=>{ playerFinals[p.name]=p.chips; });
+  const ws={...pkSan(pkSt),winnerName:win.name,winnerChips:win.chips,
+            winnerHand:win.hand,handName:hName,stk:pkSt.stk,playerFinals};
   bc({type:'gs',s:ws});
-  syncBalance(+win.chips);
-  setTimeout(()=>showWinner('🏆',win.name+' побеждает!','+$'+win.chips,hName,win.hand),500);
+  // Хост: возвращаем СВОИ чипы (не победителя)
+  const hostMe=pkSt.players[0];
+  const hostFinal=playerFinals[hostMe.name]||0;
+  const hostIsWin=hostMe.name===win.name;
+  if(hostIsWin){
+    syncBalance(+win.chips);
+    const net=win.chips-pkSt.stk;
+    setTimeout(()=>showWinner('🏆',win.name+' побеждает!','+'+(net>=0?'$'+net:'$0'),hName,win.hand),500);
+  } else {
+    syncBalance(+hostFinal);
+    const lost=pkSt.stk-hostFinal;
+    setTimeout(()=>showWinner('😔',win.name+' побеждает!','Вы проиграли $'+Math.max(0,lost),hName),500);
+  }
 }
 function pkScore7(hand,comm){
   const all=[...hand,...comm].filter(Boolean);
@@ -1183,7 +1289,7 @@ function dkInit(){
   players.forEach(p=>{for(let i=0;i<6;i++)p.hand.push(deck.pop());});
   const tr=deck[deck.length-1];
   dkSt={players,deck,trump:tr.s,trCard:tr,table:[],att:0,def:1%players.length,phase:'attack',round:1};
-  myDkI=0;dkSel=null;dkGameOver=false;
+  myDkI=0;dkSel=null;dkGameOver=false;_dkLock=false;
   myDkHand=players[0].hand.slice();
   const stk=curBuyin;
   syncBalance(-stk);updateBalanceUI();
@@ -1205,11 +1311,24 @@ function dkRecvState(s){
   if(!s)return;dkSt=s;
   if(s.hands&&s.hands[pName])myDkHand=[...s.hands[pName]];
   if(dkSt.players[myDkI])dkSt.players[myDkI].hand=myDkHand;
-  if(s.winnerName&&!dkGameOver){
+  if((s.prizes||s.loserName)&&!dkGameOver){
     dkGameOver=true;
-    const isW=s.winnerName===pName,prize=s.prize||curBuyin*2;
-    if(isW){syncBalance(+prize);setTimeout(()=>showWinner('🃏',s.winnerName+' победил!','+$'+prize,'Дурак: '+(s.loserName||'?')),500);}
-    else setTimeout(()=>showWinner('😔',s.winnerName+' победил!','Вы — дурак! -$'+curBuyin,''),500);
+    const prizes=s.prizes||{};
+    const myPrize=prizes[pName]||0;
+    const isLoser=pName===s.loserName;
+    const finOrder=s.finishOrder||[];
+    const myRank=finOrder.indexOf(pName)+1||s.players.length;
+    if(myPrize>0) syncBalance(+myPrize);
+    const emoji=myRank===1?'🏆':myRank===2?'🥈':isLoser?'🃏':'😔';
+    const title=myRank===1?'Победа!':myRank===2?'2-е место!':isLoser?'Ты Дурак! 🤣':'Игра окончена';
+    const sub=myPrize>0?'+$'+myPrize:isLoser?'Дурак платит позор 😅':'$0';
+    const n1=finOrder[0]||'',n2=finOrder[1]||'';
+    const detail=(n1?'🏆 '+n1+(prizes[n1]?' +$'+prizes[n1]:'')+'
+':'')
+                +(n2&&n2!==s.loserName?'🥈 '+n2+(prizes[n2]?' +$'+prizes[n2]:'')+'
+':'')
+                +(s.loserName?'🤣 Дурак: '+s.loserName:'');
+    setTimeout(()=>showWinner(emoji,title,sub,detail),500);
     return;
   }
   dkRend();
@@ -1218,7 +1337,11 @@ function dkSan(st){
   const hands=Object.fromEntries(st.players.map(p=>[p.name,p.hand]));
   return{...st,players:st.players.map(p=>({...p,hand:Array(p.hand.length).fill(null)})),deck:Array(st.deck.length).fill(null),hands};
 }
-function dkBC(){dkRend();bc({type:'gs',s:dkSan(dkSt)});}
+let _dkRafPending=false;
+function dkBC(){
+  if(!_dkRafPending){_dkRafPending=true;requestAnimationFrame(()=>{_dkRafPending=false;dkRend();});}
+  bc({type:'gs',s:dkSan(dkSt)});
+}
 function dkRend(){
   if(!dkSt)return;
   const s=dkSt;
@@ -1231,11 +1354,31 @@ function dkRend(){
   const mr=$('dkMR');mr.textContent=r==='att'?'⚔️ Атака':r==='def'?'🛡 Защита':'—';mr.className='dk-mr '+r;
   const opps=$('dkOpps');opps.innerHTML='';
   s.players.forEach((p,i)=>{if(i===myDkI)return;const role=s.att===i?'att':s.def===i?'def':'';const div=document.createElement('div');div.className='dk-seat '+role;div.innerHTML=`<div class="dk-sn">${p.name}</div><div class="dk-sc">🃏 ${p.hand.length}</div><div class="dk-sr ${role}">${role==='att'?'⚔️':role==='def'?'🛡':''}</div>`;opps.appendChild(div);});
-  const tbl=$('dkTable');tbl.innerHTML='';
-  if(s.table.length===0)tbl.innerHTML='<div style="color:var(--dim);font-style:italic;font-size:14px">Стол пуст</div>';
-  s.table.forEach(pair=>{const div=document.createElement('div');div.className='dk-pair';div.innerHTML=rc(pair.att,'dkc')+(pair.def?rc(pair.def,'dkc highlight'):'<div class="dkc cback"></div>');tbl.appendChild(div);});
-  const handEl=$('dkHand');handEl.innerHTML='';
-  hand.forEach((c,i)=>{if(!c)return;const wrap=document.createElement('div');wrap.innerHTML=rc(c,'dkhc');const el=wrap.firstChild;if(dkSel===i)el.classList.add('selected');el.addEventListener('click',()=>dkSel2(i));handEl.appendChild(el);});
+  const tbl=$('dkTable');
+  if(s.table.length===0){tbl.innerHTML='<div style="color:var(--dim);font-style:italic;font-size:14px">Стол пуст</div>';}
+  else{
+    const tf=document.createDocumentFragment();
+    s.table.forEach(pair=>{
+      const div=document.createElement('div');div.className='dk-pair';
+      div.innerHTML=rc(pair.att,'dkc','card-deal')+(pair.def?rc(pair.def,'dkc highlight','card-deal'):'<div class="dkc cback"></div>');
+      tf.appendChild(div);
+    });
+    tbl.innerHTML='';tbl.appendChild(tf);
+  }
+  const handEl=$('dkHand');
+  // DocumentFragment для оптимального рендера
+  const frag=document.createDocumentFragment();
+  hand.forEach((c,i)=>{
+    if(!c)return;
+    const wrap=document.createElement('div');
+    wrap.innerHTML=rc(c,'dkhc');
+    const el=wrap.firstChild;
+    if(dkSel===i)el.classList.add('selected');
+    el.addEventListener('click',()=>dkSel2(i),{passive:true});
+    frag.appendChild(el);
+  });
+  handEl.innerHTML='';
+  handEl.appendChild(frag);
   const isA=s.att===myDkI&&s.phase==='attack',isD=s.def===myDkI,undef=s.table.filter(p=>!p.def).length;
   if(dkGameOver)$('dkSt').textContent='Игра окончена';
   else if(isA)$('dkSt').textContent='⚔️ Ваш ход — выберите карту';
@@ -1245,17 +1388,42 @@ function dkRend(){
   $('dkTake').style.display=!dkGameOver&&isD&&undef>0?'block':'none';
   $('dkPass').style.display=!dkGameOver&&isA&&s.table.length>0&&undef===0?'block':'none';
 }
+let _dkLock=false;
 function dkSel2(i){
-  if(!dkSt||dkGameOver)return;
-  const s=dkSt,hand=myDkHand.length?myDkHand:s.players[myDkI].hand,card=hand[i];if(!card)return;
+  if(!dkSt||dkGameOver||_dkLock)return;
+  const s=dkSt;
+  const hand=myDkHand.length?myDkHand:s.players[myDkI].hand;
+  const card=hand[i];
+  if(!card)return;
   const isA=s.att===myDkI&&s.phase==='attack',isD=s.def===myDkI;
+  if(!isA&&!isD)return;
+  // Защита от дублей: немедленно убрать карту из локальной руки
+  myDkHand=myDkHand.filter((_,j)=>j!==i);
+  _dkLock=true; setTimeout(()=>{_dkLock=false;},800);
   if(isA){
-    if(s.table.length>0){const tR=new Set(s.table.flatMap(p=>[p.att?.r,p.def?.r].filter(Boolean)));if(!tR.has(card.r)){toast('Можно подкидывать только те же достоинства!');return;}}
-    dkSel=i;dkRend();const a={type:'ga',action:'attack',p:myDkI,card};if(isHost)dkProc(a);else sh(a);dkSel=null;
+    if(s.table.length>0){
+      const tR=new Set(s.table.flatMap(p=>[p.att?.r,p.def?.r].filter(Boolean)));
+      if(!tR.has(card.r)){
+        myDkHand=hand.slice(); // вернуть карту если нельзя подкинуть
+        _dkLock=false;
+        toast('Можно подкидывать только те же достоинства!');return;
+      }
+    }
+    dkSel=null;
+    const a={type:'ga',action:'attack',p:myDkI,card};
+    if(isHost)dkProc(a);else sh(a);
   }else if(isD){
-    const ui=s.table.findIndex(p=>!p.def);if(ui<0){toast('Нечего отбивать');return;}
-    dkSel=i;dkRend();const a={type:'ga',action:'defend',pi:ui,p:myDkI,card};if(isHost)dkProc(a);else sh(a);dkSel=null;
+    const ui=s.table.findIndex(p=>!p.def);
+    if(ui<0){
+      myDkHand=hand.slice(); // вернуть карту
+      _dkLock=false;
+      toast('Нечего отбивать');return;
+    }
+    dkSel=null;
+    const a={type:'ga',action:'defend',pi:ui,p:myDkI,card};
+    if(isHost)dkProc(a);else sh(a);
   }
+  dkRend();
 }
 function dkTake(){if(!dkGameOver){const a={type:'ga',action:'take',p:myDkI};if(isHost)dkProc(a);else sh(a);}}
 function dkPass(){if(!dkGameOver){const a={type:'ga',action:'pass',p:myDkI};if(isHost)dkProc(a);else sh(a);}}
@@ -1264,7 +1432,9 @@ function dkProc(d){
   const s=dkSt,n=s.players.length;
   if(d.action==='attack'){
     const p=s.players[d.p],c=d.card;if(!c)return;
-    const ci=p.hand.findIndex(h=>h&&h.r===c.r&&h.s===c.s);if(ci>=0)p.hand.splice(ci,1);
+    const ci=p.hand.findIndex(h=>h&&h.r===c.r&&h.s===c.s);
+    if(ci<0)return; // карта уже сыграна — защита от дублей
+    p.hand.splice(ci,1);
     if(d.p===myDkI)myDkHand=[...p.hand];
     s.table.push({att:c,def:null});s.phase='defense';
     if(!dkCheckWin(s))dkBC();
@@ -1274,37 +1444,111 @@ function dkProc(d){
     const ai=DKR.indexOf(pair.att.r),di=DKR.indexOf(dc.r);
     const valid=(dc.s===pair.att.s&&di>ai)||(dc.s===s.trump&&pair.att.s!==s.trump);
     if(!valid){toast('Нельзя побить эту карту!');return;}
-    pair.def=dc;const ci=p.hand.findIndex(h=>h&&h.r===dc.r&&h.s===dc.s);if(ci>=0)p.hand.splice(ci,1);
+    const ci=p.hand.findIndex(h=>h&&h.r===dc.r&&h.s===dc.s);
+    if(ci<0)return; // карта уже сыграна — защита от дублей
+    pair.def=dc;p.hand.splice(ci,1);
     if(d.p===myDkI)myDkHand=[...p.hand];
     if(s.table.every(p=>p.def))s.phase='attack';
     if(!dkCheckWin(s))dkBC();
   }else if(d.action==='take'){
     const defP=s.players[s.def];s.table.forEach(pr=>{defP.hand.push(pr.att);if(pr.def)defP.hand.push(pr.def);});
     if(s.def===myDkI)myDkHand=[...defP.hand];
-    s.table=[];s.phase='attack';const nextAtt=(s.def+1)%n;s.att=nextAtt;s.def=(nextAtt+1)%n;
+    s.table=[];s.phase='attack';
+    // Переход хода — пропускаем финишировавших
+    s.att=dkNextActive(s,s.def+1);
+    s.def=dkNextActive(s,s.att+1,s.att);
     dkDraw(s);if(!dkCheckWin(s))dkBC();
   }else if(d.action==='pass'){
-    s.table=[];s.phase='attack';s.round++;s.att=s.def%n;s.def=(s.att+1)%n;
+    s.table=[];s.phase='attack';s.round++;
+    // После успешной атаки — атакует следующий активный
+    s.att=dkNextActive(s,s.def);
+    s.def=dkNextActive(s,s.att+1,s.att);
     dkDraw(s);if(!dkCheckWin(s))dkBC();
   }
 }
+function dkPrize(finishRank, n, buyin){
+  // finishRank: 1=победитель(первый сбросил), n=дурак(проиграл)
+  // Пример n=3,buyin=500: 1й=1250, 2й=250, 3й=0
+  if(finishRank===n) return 0; // дурак — теряет всё
+  const total=n*buyin;
+  if(n===2) return finishRank===1?total:0;
+  const consolation=Math.floor(buyin/2); // 2е место получает половину взноса
+  if(finishRank===1) return total-consolation*(n-2);
+  if(finishRank===2) return consolation;
+  return 0; // промежуточные места (если 4+ игроков)
+}
+// Найти следующего активного игрока (не finished), начиная с from
+function dkNextActive(s,from,skip=-1){
+  const n=s.players.length;
+  let idx=((from%n)+n)%n;
+  for(let t=0;t<n;t++){
+    if(!s.players[idx].finished&&idx!==skip)return idx;
+    idx=(idx+1)%n;
+  }
+  return idx; // fallback
+}
 function dkCheckWin(s){
-  const winners=s.players.filter(p=>p.hand.length===0&&s.deck.length===0);
-  if(!winners.length)return false;
-  const remaining=s.players.filter(p=>p.hand.length>0);
-  if(!remaining.length)return false;
-  const loser=remaining.reduce((a,b)=>a.hand.length>=b.hand.length?a:b);
-  const winner=winners[0],prize=curBuyin*s.players.length;
-  dkGameOver=true;
-  const ws={...dkSan(s),winnerName:winner.name,loserName:loser.name,prize};
-  bc({type:'gs',s:ws});
-  if(winner.name===lbPlayers[myDkI]?.name)syncBalance(+prize);
-  setTimeout(()=>showWinner('🃏',winner.name+' победил!','+$'+prize,'Дурак: '+loser.name+' 🤣'),400);
-  return true;
+  if(!s.finishOrder) s.finishOrder=[];
+  if(s.deck.length===0){
+    // Игроки без карт при пустой колоде — они закончили (по порядку)
+    s.players.forEach(p=>{
+      if(!p.finished&&p.hand.length===0){
+        p.finished=true;
+        if(!s.finishOrder.includes(p.name)) s.finishOrder.push(p.name);
+      }
+    });
+  }
+  const active=s.players.filter(p=>!p.finished);
+  if(active.length<=1){
+    // Игра окончена
+    const loser=active[0]||null;
+    if(loser&&!s.finishOrder.includes(loser.name)) s.finishOrder.push(loser.name);
+    dkGameOver=true;
+    const n=s.players.length,buyin=curBuyin;
+    const prizes={};
+    s.players.forEach(p=>{
+      const rank=s.finishOrder.indexOf(p.name)+1;
+      prizes[p.name]=dkPrize(rank,n,buyin);
+    });
+    const loserName=loser?.name||s.finishOrder[s.finishOrder.length-1]||'';
+    const ws={...dkSan(s),prizes,loserName,finishOrder:s.finishOrder};
+    bc({type:'gs',s:ws});
+    const myPrize=prizes[pName]||0;
+    const myRank=s.finishOrder.indexOf(pName)+1;
+    if(myPrize>0) syncBalance(+myPrize);
+    const isLoser=pName===loserName;
+    const emoji=myRank===1?'🏆':myRank===2?'🥈':isLoser?'🃏':'😔';
+    const title=myRank===1?'Победа!':myRank===2?'2-е место!':isLoser?'Ты Дурак! 🤣':'Игра окончена';
+    const sub=myPrize>0?'+$'+myPrize:(isLoser?'Дурак платит позор 😅':'$0');
+    const n1=s.finishOrder[0]||'';const n2=s.finishOrder[1]||'';
+    const detail=(n1?'🏆 '+n1+(prizes[n1]?' +$'+prizes[n1]:'')+'
+':'')
+                +(n2&&n2!==loserName?'🥈 '+n2+(prizes[n2]?' +$'+prizes[n2]:'')+'
+':'')
+                +(loserName?'🤣 Дурак: '+loserName:'');
+    setTimeout(()=>showWinner(emoji,title,sub,detail),400);
+    return true;
+  }
+  // Если текущий атакующий/защищающий финишировал — перестроить
+  const attActive=!s.players[s.att]?.finished;
+  const defActive=!s.players[s.def]?.finished;
+  if(!attActive||!defActive){
+    if(!attActive){
+      s.att=dkNextActive(s,s.att+1);
+    }
+    s.def=dkNextActive(s,s.att+1,s.att);
+    s.table=[];s.phase='attack';
+  }
+  return false;
 }
 function dkDraw(s){
   const order=[s.att,s.def,...s.players.map((_,i)=>i).filter(i=>i!==s.att&&i!==s.def)];
-  order.forEach(i=>{const p=s.players[i];while(p.hand.length<6&&s.deck.length>0)p.hand.push(s.deck.pop());if(i===myDkI)myDkHand=[...p.hand];});
+  order.forEach(i=>{
+    const p=s.players[i];
+    if(p.finished)return; // финишировавшим карты не раздаём
+    while(p.hand.length<6&&s.deck.length>0)p.hand.push(s.deck.pop());
+    if(i===myDkI)myDkHand=[...p.hand];
+  });
 }
 
 </script>

@@ -444,15 +444,18 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def handle_any(update: Update, ctx: ContextTypes.DEFAULT_TYPE, from_start=False):
     """Обрабатывает любое сообщение — регистрация или команды"""
+    if not update.message: return
     u = update.effective_user
+    if not u: return
     text = (update.message.text or "").strip()
+    if not text or text.startswith('/'): return  # игнорировать пустые/команды
 
     # Уже зарегистрирован
     if player_exists(u.id):
         clear_pending(u.id)
         row = get_player(u.id)
         nick, bal = row[1], row[2]
-        kb = play_kb()
+        kb = play_kb(u.id)
         if from_start:
             await update.message.reply_text(
                 f"🎰 *Casino Night*\n\n"
@@ -467,22 +470,22 @@ async def handle_any(update: Update, ctx: ContextTypes.DEFAULT_TYPE, from_start=
 
     # Ожидает ввода ника
     if is_pending(u.id):
+      try:
         nick = text
-        # Валидация
-        if len(nick) < 2 or len(nick) > 16:
+        import re as _re
+        nick_clean = nick.strip()
+        if len(nick_clean) < 2 or len(nick_clean) > 16:
             await update.message.reply_text(
-                "❌ Ник должен быть от *2 до 16 символов*.\nПопробуй ещё раз:",
-                parse_mode="Markdown"); return
-        if not nick.replace("_","").replace("-","").replace(".","").isalnum():
+                "❌ Ник должен быть от 2 до 16 символов. Попробуй ещё раз:"); return
+        if not _re.match(r'^[a-zA-Zа-яА-ЯёЁ0-9_\-\.]+$', nick_clean):
             await update.message.reply_text(
-                "❌ Только буквы, цифры, _ - .\nПопробуй ещё раз:",
-                parse_mode="Markdown"); return
+                "❌ Только буквы, цифры, _ - .\nБез пробелов и спецсимволов. Попробуй ещё раз:"); return
+        nick = nick_clean
         # Проверить уникальность
         existing = qone("SELECT tg_id FROM players WHERE LOWER(nickname)=LOWER(%s)", (nick,))
         if existing:
             await update.message.reply_text(
-                f"❌ Ник *{nick}* уже занят. Попробуй другой:",
-                parse_mode="Markdown"); return
+                f"❌ Ник '{nick}' уже занят. Выбери другой:"); return
         # Создать игрока
         create_player(u.id, u.username or "", nick)
         clear_pending(u.id)
@@ -490,15 +493,18 @@ async def handle_any(update: Update, ctx: ContextTypes.DEFAULT_TYPE, from_start=
         log.info(f"[REG] tg_id={u.id} nick={nick} balance={bal}")
         kb = play_kb(u.id)
         await update.message.reply_text(
-            f"✅ *Добро пожаловать в Casino Night, {nick}!*\n\n"
-            f"💰 Стартовый баланс: *$1000*\n\n"
+            f"✅ Добро пожаловать в Casino Night, {nick}!\n\n"
+            f"💰 Стартовый баланс: $1000\n\n"
             f"🃏 /play — открыть казино\n"
-            f"💵 /balance — твой баланс\n"
+            f"💵 /balance — баланс\n"
             f"🎁 /daily — бонус $500 каждые 24ч\n"
             f"👑 /top — таблица лидеров\n\n"
-            f"_Ник нельзя изменить, выбирай с умом!_",
-            parse_mode="Markdown", reply_markup=kb)
-        return
+            f"Ник нельзя изменить!",
+            reply_markup=kb)
+      except Exception as e:
+        log.error(f"[REG] nick error tg_id={u.id}: {e}")
+        await update.message.reply_text("⚠️ Ошибка. Попробуй ввести ник ещё раз (только буквы/цифры):")
+      return
 
     # Новый пользователь — начать регистрацию
     set_pending(u.id)
