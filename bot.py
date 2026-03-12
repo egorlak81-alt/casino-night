@@ -238,6 +238,36 @@ def api_botinfo():
     """Возвращает username бота для ссылки в приложении"""
     return jsonify({"username": BOT_USERNAME})
 
+@app.route("/api/validate", methods=["POST", "OPTIONS"])
+def api_validate():
+    """Клиент отправляет initData, сервер парсит и возвращает tg_id + профиль.
+    Используется как последний резерв если клиент не может прочитать tg_id."""
+    if request.method == "OPTIONS": return jsonify({}), 200
+    d = request.get_json() or {}
+    init_data = d.get("initData", "")
+    if not init_data:
+        return jsonify({"error": "no initData"}), 400
+    try:
+        from urllib.parse import unquote, parse_qs
+        params = parse_qs(init_data)
+        user_str = params.get("user", [""])[0]
+        if not user_str:
+            return jsonify({"error": "no user in initData"}), 400
+        import json as _json
+        user = _json.loads(unquote(user_str))
+        tg_id = user.get("id")
+        if not tg_id:
+            return jsonify({"error": "no id in user"}), 400
+        log.info(f"[VALIDATE] tg_id={tg_id} from initData")
+        row = get_player(int(tg_id))
+        if not row or not row[1]:
+            return jsonify({"tg_id": tg_id, "exists": False})
+        return jsonify({"tg_id": tg_id, "exists": True,
+                        "nickname": row[1], "balance": row[2]})
+    except Exception as e:
+        log.error(f"[VALIDATE] error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/debug")
 def api_debug():
     rows = qall("SELECT tg_id,nickname,balance,games_played FROM players ORDER BY created_at DESC LIMIT 30") or []
@@ -350,10 +380,13 @@ BOT_USERNAME = ""  # заполним при старте
 
 def play_kb(tg_id=None):
     if not GAME_URL: return None
-    url = GAME_URL
+    # Передаём tg_id в URL чтобы приложение могло прочитать его даже
+    # если window.Telegram не доступен (Telegram Desktop/Web иногда не передаёт initData)
+    url = GAME_URL.rstrip("/")
     if tg_id:
         sep = "&" if "?" in url else "?"
-        url = f"{url}{sep}tg_id={tg_id}"
+        url = f"{url}{sep}tg_id={tg_id}#{tg_id}"
+    log.info(f"[KB] WebApp URL: {url}")
     return InlineKeyboardMarkup([[InlineKeyboardButton("🎰 Играть", web_app=WebAppInfo(url=url))]])
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
