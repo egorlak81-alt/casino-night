@@ -10,11 +10,15 @@
 <meta name="theme-color" content="#0a1a0f">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <meta name="apple-mobile-web-app-capable" content="yes">
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Crimson+Text:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Шрифты загружаются асинхронно — не блокируют init -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&display=swap" onload="this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&display=swap"></noscript>
 <style>
 :root{--bg:#0a1a0f;--gold:#c8a84b;--gold2:#edd880;--gold3:#f5e9b0;--red:#cc2233;--card:#faf7f0;--text:#e2d5b8;--dim:#6b5e42}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;color:var(--text);overflow:hidden}
+html,body{height:100%;background:var(--bg);font-family:Georgia,'Times New Roman',serif;color:var(--text);overflow:hidden}
 .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;overflow-y:auto;transition:opacity .25s,transform .25s;contain:layout style}
 .screen.hidden{opacity:0;pointer-events:none;transform:translateY(12px)}
 /* MENU */
@@ -24,7 +28,7 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
 .menu-hdr{width:100%;text-align:center;padding:44px 0 28px}
 .setup{width:100%;max-width:380px;margin:0 auto 18px;background:rgba(255,255,255,.03);border:1px solid rgba(200,168,75,.15);border-radius:14px;padding:16px 18px}
 .slbl{font-size:11px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;margin-bottom:8px}
-.ninput{width:100%;background:rgba(0,0,0,.3);border:1px solid rgba(200,168,75,.2);border-radius:8px;padding:12px 14px;color:var(--text);font-family:'Crimson Text',serif;font-size:18px;outline:none}
+.ninput{width:100%;background:rgba(0,0,0,.3);border:1px solid rgba(200,168,75,.2);border-radius:8px;padding:12px 14px;color:var(--text);font-family:Georgia,serif;font-size:18px;outline:none}
 .ninput:focus{border-color:var(--gold)}
 .ninput::placeholder{color:var(--dim)}
 .games-grid{width:100%;max-width:380px;display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 auto}
@@ -658,7 +662,7 @@ async function refreshBalance(){
 }
 
 // ── ИНИЦИАЛИЗАЦИЯ ──
-window.addEventListener('load', async ()=>{
+document.addEventListener('DOMContentLoaded', async ()=>{
   showScreen('loading');
   setLoading('Подключение к Telegram...');
 
