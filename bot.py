@@ -51,6 +51,8 @@ def init_db():
     )""")
     try: qexec("ALTER TABLE players ADD COLUMN IF NOT EXISTS nickname TEXT DEFAULT \'\'")
     except: pass
+    try: qexec("ALTER TABLE players ADD COLUMN IF NOT EXISTS last_bonus TIMESTAMP DEFAULT NULL")
+    except: pass
     # Таблица для хранения состояния диалога регистрации
     qexec("""CREATE TABLE IF NOT EXISTS reg_pending (
         tg_id      BIGINT PRIMARY KEY,
@@ -560,6 +562,24 @@ async def cmd_addbal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     qexec("UPDATE players SET balance=%s WHERE tg_id=%s",(new_bal,tid))
     await update.message.reply_text(f"✅ {row[1] or tid}: {row[2]} → {new_bal}")
 
+async def cmd_bonus(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    u = update.effective_user
+    if not u: return
+    if not player_exists(u.id):
+        await update.message.reply_text("❌ Сначала зарегистрируйся — напиши мне любое сообщение.")
+        return
+    args = ctx.args
+    if not args or args[0] != 'casino777':
+        await update.message.reply_text("🎰 Неверный код.\n\nФормат: /bonus <код>")
+        return
+    used = qone("SELECT 1 FROM players WHERE tg_id=%s AND last_bonus > NOW() - INTERVAL \'24 hours\'", (u.id,))
+    if used:
+        await update.message.reply_text("⏳ Бонус уже получен сегодня. Возвращайся через 24 часа!")
+        return
+    qexec("UPDATE players SET balance=balance+1000, last_bonus=NOW() WHERE tg_id=%s", (u.id,))
+    bal = get_balance(u.id)
+    await update.message.reply_text(f"🎁 *+$1000* зачислено!\n💰 Баланс: *${bal}*", parse_mode="Markdown")
+
 # ════════════════════════════════
 # ── STARTUP ──
 # ════════════════════════════════
@@ -580,6 +600,7 @@ def setup():
     tg_app.add_handler(CommandHandler("balance", cmd_balance))
     tg_app.add_handler(CommandHandler("daily",   cmd_daily))
     tg_app.add_handler(CommandHandler("top",     cmd_top))
+    tg_app.add_handler(CommandHandler("bonus",   cmd_bonus))
     tg_app.add_handler(CommandHandler("setnick", cmd_setnick))
     tg_app.add_handler(CommandHandler("addbal",  cmd_addbal))
     # Любое текстовое сообщение (не команда) → регистрация

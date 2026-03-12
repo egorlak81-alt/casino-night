@@ -740,35 +740,22 @@ function initButtons(){
   $('btnLbBack').addEventListener('click',()=>{leaveRoom();showScreen('rooms');loadRooms();});
   $('wAgain').addEventListener('click',()=>{
     $('wov').classList.add('hidden');
+    // Сброс цвета оверлея
+    $('wov').style.background='rgba(0,0,0,.88)';
+    $('wT').style.color='var(--gold)';
     if(curGame==='blackjack') bjReset();
     else if(curGame==='dice') cfReset();
     else{ refreshBalance(); leaveRoom(); showScreen('rooms'); loadRooms(); }
   });
-  $('wMenu').addEventListener('click',()=>{$('wov').classList.add('hidden');leaveRoom();refreshBalance();showScreen('menu');});
+  $('wMenu').addEventListener('click',()=>{
+    $('wov').classList.add('hidden');
+    $('wov').style.background='rgba(0,0,0,.88)';
+    $('wT').style.color='var(--gold)';
+    leaveRoom();refreshBalance();showScreen('menu');
+  });
 
-  // ── СЕКРЕТНЫЙ КОД ──
-  // Тапни по балансу в меню 7 раз → появится поле ввода
-  let _secretTaps=0,_secretTimer=null;
-  const _balEl=$('menuBal')||$('bjBal');
-  // Вешаем на лого казино в меню
-  const _logoEl=document.querySelector('.logo');
-  if(_logoEl){
-    _logoEl.addEventListener('click',()=>{
-      _secretTaps++;
-      clearTimeout(_secretTimer);
-      _secretTimer=setTimeout(()=>{_secretTaps=0;},2000);
-      if(_secretTaps>=7){
-        _secretTaps=0;
-        const code=prompt('🎰 Введи код:');
-        if(code==='casino777'){
-          syncBalance(1000);
-          toast('🎁 +$1000 получено!',3000);
-        } else if(code!==null){
-          toast('❌ Неверный код');
-        }
-      }
-    });
-  }
+  // ── СЕКРЕТНЫЙ КОД — обрабатывается через бот-команду /bonus ──
+  // Логика на стороне bot.py
   $('c5').addEventListener('click',()=>bjBet(5));$('c10').addEventListener('click',()=>bjBet(10));
   $('c25').addEventListener('click',()=>bjBet(25));$('c50').addEventListener('click',()=>bjBet(50));
   $('c100').addEventListener('click',()=>bjBet(100));$('cX').addEventListener('click',()=>bjClear());
@@ -1055,10 +1042,23 @@ function bjEnd(res){
 
   setTimeout(()=>{
     const ps=bjSc(bjP), ds=bjSc(bjDl);
+    const netStr = net>0 ? '💚 +$'+net : net===0 ? '🤝 ±$0' : '🔴 -$'+Math.abs(net);
     showWinner(emoji, title,
-      (net>0?'+$'+net:net===0?'±$0':'-$'+bjB)+' → Баланс: $'+myBalance,
-      'Ваши карты: '+ps+'  |  Дилер: '+ds
+      netStr+' · Баланс: $'+myBalance,
+      'Ваши карты: '+ps+'  |  Дилер: '+(res==='bust'?ds:''+ds)
     );
+    // Красим заголовок и фон оверлея по результату
+    const wt=$('wT'), wov=$('wov');
+    if(net>0){
+      wt.style.color='#44ee77';
+      wov.style.background='rgba(0,40,0,.92)';
+    } else if(net===0){
+      wt.style.color='var(--gold)';
+      wov.style.background='rgba(0,0,0,.88)';
+    } else {
+      wt.style.color='#ff5555';
+      wov.style.background='rgba(40,0,0,.92)';
+    }
     $('wAgain').textContent='Играть снова';
   },300);
 
