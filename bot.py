@@ -207,11 +207,14 @@ def api_me():
     row = get_player(tg_id)
     log.info(f"[ME] tg_id={tg_id} row={'found nick='+repr(row[1]) if row else 'NOT FOUND'}")
     if not row:
+        # Пользователь не регистрировался через бота → показать экран регистрации
         return jsonify({"exists": False}), 200
+    # Ник пустой (старый баг) — дать авто-ник и пустить
     nick = row[1] if row[1] else f"Player{tg_id % 10000}"
     if not row[1]:
         try: qexec("UPDATE players SET nickname=%s WHERE tg_id=%s AND (nickname IS NULL OR nickname='')", (nick, tg_id))
         except: pass
+        log.info(f"[ME] auto-nick assigned: {nick}")
     return jsonify({"exists": True, "tg_id": row[0], "nickname": nick,
                     "balance": row[2], "total_won": row[3],
                     "total_lost": row[4], "games_played": row[5]})

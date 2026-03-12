@@ -572,15 +572,20 @@ function updateNickUI(){
 async function apiFetch(path, opts={}, timeoutMs=8000){
   const ctrl=new AbortController();
   const tid=setTimeout(()=>ctrl.abort(),timeoutMs);
+  // Не добавляем Content-Type на GET — это вызывает CORS preflight и блокировку
+  const isGet=!opts.method||opts.method==='GET';
+  const headers=isGet?{}:{'Content-Type':'application/json'};
   try{
     const r=await fetch(SERVER+path,{
-      headers:{'Content-Type':'application/json'},
+      headers,
       signal:ctrl.signal,
       ...opts
     });
     clearTimeout(tid);
-    const d=await r.json();
-    if(!r.ok) throw new Error(d.error||'HTTP '+r.status);
+    const text=await r.text();
+    let d;
+    try{ d=JSON.parse(text); }catch(e){ throw new Error('Bad JSON: '+text.slice(0,100)); }
+    if(!r.ok) throw new Error((d&&d.error)||'HTTP '+r.status);
     return d;
   }catch(e){
     clearTimeout(tid);
@@ -590,14 +595,24 @@ async function apiFetch(path, opts={}, timeoutMs=8000){
 
 // ── Получить профиль с сервера ──
 async function loadProfile(){
-  if(!myTgId) return false;
+  if(!myTgId){ console.error('[LP] no tg_id'); return false; }
   try{
     const d=await apiFetch(`/api/me?tg_id=${myTgId}`);
-    if(!d.exists) return false;
-    myNick=d.nickname; myBalance=d.balance;
+    console.log('[LP] response:', JSON.stringify(d));
+    // exists может быть true/1/"true" — проверяем нестрого
+    if(!d || d.exists==false || d.exists===0){
+      console.warn('[LP] exists=false for tg_id='+myTgId);
+      return false;
+    }
+    myNick = d.nickname || ('Игрок'+String(myTgId).slice(-4));
+    myBalance = (d.balance!=null) ? d.balance : 0;
     updateNickUI(); updateBalanceUI();
+    console.log('[LP] OK nick='+myNick+' bal='+myBalance);
     return true;
-  }catch(e){ console.error('loadProfile:',e); return false; }
+  }catch(e){
+    console.error('[LP] error:',e.message);
+    return false;
+  }
 }
 
 // ── Изменить баланс на сервере, вернуть новый ──
@@ -693,7 +708,11 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     }
 
     clearTimeout(_bail);
-    if(!exists){ _showBlocked(null); return; }
+    if(!exists){
+      console.error('[INIT] exists=false, tg_id='+myTgId+', показываем regScreen');
+      _showBlocked(null);
+      return;
+    }
 
     showScreen('menu');
     updateNickUI(); updateBalanceUI();
