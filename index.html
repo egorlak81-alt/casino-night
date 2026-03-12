@@ -269,23 +269,29 @@ html,body{height:100%;background:var(--bg);font-family:'Crimson Text',serif;colo
   </div>
 </div>
 
-<!-- REGISTRATION SCREEN -->
+<!-- BLOCKED SCREEN — не зарегистрирован -->
 <div id="regScreen" class="screen hidden">
-  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:24px;padding:32px">
-    <div style="font-family:'Cinzel',serif;font-size:26px;color:var(--gold);letter-spacing:3px;text-align:center">🎰 CASINO NIGHT</div>
-    <div style="font-family:'Cinzel',serif;font-size:16px;color:var(--gold2);text-align:center">Добро пожаловать!</div>
-    <div style="color:var(--dim);font-size:14px;text-align:center;line-height:1.6">
-      Выбери ник — он будет постоянным<br>и виден другим игрокам
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:20px;padding:32px;text-align:center">
+    <div style="font-size:56px">🎰</div>
+    <div style="font-family:'Cinzel',serif;font-size:22px;color:var(--gold);letter-spacing:3px">CASINO NIGHT</div>
+    <div style="background:rgba(255,80,80,.1);border:1px solid rgba(255,80,80,.3);border-radius:16px;padding:20px 24px;max-width:320px">
+      <div style="font-size:20px;margin-bottom:10px">🔒</div>
+      <div style="font-family:'Cinzel',serif;font-size:15px;color:#ff8080;margin-bottom:8px">Нужна регистрация</div>
+      <div style="color:var(--dim);font-size:14px;line-height:1.7">
+        Пройди быструю регистрацию<br>в Telegram боте — это займёт<br>10 секунд!
+      </div>
     </div>
-    <div style="width:100%;max-width:320px;display:flex;flex-direction:column;gap:12px">
-      <input id="regNickInput" class="ninput" placeholder="Твой ник (2–16 символов)" maxlength="16"
-        style="font-size:18px;text-align:center;padding:14px">
-      <div id="regError" style="color:#cc4444;font-size:13px;text-align:center;min-height:18px"></div>
-      <button class="btn btn-g" id="regSubmit" onclick="doRegister()">✅ Начать играть</button>
-    </div>
-    <div style="color:var(--dim);font-size:12px;text-align:center;margin-top:8px">
-      Стартовый баланс: <span style="color:var(--gold)">$1000</span>
-    </div>
+    <div style="color:var(--dim);font-size:13px">Напиши боту любое сообщение<br>и следуй инструкциям:</div>
+    <a id="botLink" href="https://t.me/YOUR_BOT" target="_blank"
+       style="background:linear-gradient(135deg,#229ED9,#1a7aaa);color:#fff;font-family:'Cinzel',serif;
+              font-size:15px;padding:14px 28px;border-radius:12px;text-decoration:none;
+              letter-spacing:1px;display:flex;align-items:center;gap:8px">
+      ✈️ Открыть бота
+    </a>
+    <div style="color:var(--dim);font-size:12px">После регистрации — перезапусти приложение</div>
+    <button onclick="location.reload()" style="background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.3);
+      color:var(--gold);font-family:'Cinzel',serif;font-size:13px;padding:10px 20px;
+      border-radius:10px;cursor:pointer;letter-spacing:1px">🔄 Уже зарегистрировался</button>
   </div>
 </div>
 
@@ -569,83 +575,82 @@ window.addEventListener('load', async ()=>{
   showScreen('loading');
   setLoading('Подключение к Telegram...');
 
-  // Получить tg_id
+  // Шаг 1: получить Telegram WebApp контекст
   const tg=window.Telegram?.WebApp;
   if(tg){
     tg.ready();
     try{ tg.expand(); }catch(e){}
-    // Ждём инициализации
-    await new Promise(res=>setTimeout(res,400));
+    await new Promise(res=>setTimeout(res,500));
     const u=tg.initDataUnsafe?.user;
-    if(u?.id){ myTgId=u.id; console.log('tg_id=',myTgId); }
-    else { console.warn('No TG user. initDataUnsafe=',JSON.stringify(tg.initDataUnsafe)); }
-  }
-
-  if(!myTgId){
-    // Нет Telegram — показать ошибку
-    setLoading('❌ Открой приложение через Telegram бота');
-    // Для дебага в браузере — временный ID
-    if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){
-      myTgId=999999999; // dev mode
-      console.warn('DEV MODE: using fake tg_id');
+    if(u?.id){
+      myTgId=u.id;
+      console.log('[INIT] tg_id='+myTgId);
     } else {
-      return; // стоп, не показываем ничего без Telegram
+      console.warn('[INIT] No user in initDataUnsafe:', JSON.stringify(tg.initDataUnsafe));
     }
   }
 
-  setLoading('Загрузка профиля...');
-  const exists=await loadProfile();
-
-  if(!exists){
-    // Новый игрок — экран регистрации
-    showScreen('regScreen');
-    $('regNickInput').focus();
-  } else {
-    showScreen('menu');
-    updateNickUI(); updateBalanceUI();
+  // Шаг 2: если нет tg_id — заблокировать
+  if(!myTgId){
+    // DEV режим только на localhost
+    if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){
+      myTgId=999999999;
+      console.warn('[DEV] fake tg_id=999999999');
+    } else {
+      // Показать экран блокировки
+      _showBlocked('❌ Открой приложение через Telegram бота');
+      return;
+    }
   }
 
-  // Слушать возврат в приложение
+  // Шаг 3: проверить регистрацию на сервере
+  setLoading('Загрузка профиля...');
+  let exists = false;
+  try{
+    exists = await loadProfile();
+  } catch(e){
+    setLoading('⚠️ Нет связи с сервером. Проверь интернет.');
+    console.error('[INIT] loadProfile failed:', e);
+    return;
+  }
+
+  // Шаг 4: не зарегистрирован — показать экран блокировки
+  if(!exists){
+    _showBlocked(null);
+    return;
+  }
+
+  // Шаг 5: всё OK — показать меню
+  showScreen('menu');
+  updateNickUI(); updateBalanceUI();
+  toast('💰 '+myNick+' · $'+myBalance);
+
+  // Слушать возврат в приложение → обновить баланс
   document.addEventListener('visibilitychange',()=>{
     if(document.visibilityState==='visible') refreshBalance();
   });
   setInterval(refreshBalance, 30000);
 
-  // Инициализируем обработчики кнопок
   initButtons();
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 });
 
-// ── РЕГИСТРАЦИЯ ──
-async function doRegister(){
-  const nick=($('regNickInput').value||'').trim();
-  if(nick.length<2||nick.length>16){
-    $('regError').textContent='Ник от 2 до 16 символов'; return;
-  }
-  $('regSubmit').disabled=true;
-  $('regError').textContent='';
-  try{
-    const d=await apiFetch('/api/register',{
-      method:'POST',
-      body:JSON.stringify({tg_id:myTgId, nickname:nick,
-        username: window.Telegram?.WebApp?.initDataUnsafe?.user?.username||''})
-    });
-    myNick=d.nickname; myBalance=d.balance;
-    updateNickUI(); updateBalanceUI();
-    showScreen('menu');
-    toast('🎉 Добро пожаловать, '+myNick+'!');
-    initButtons();
-  }catch(e){
-    $('regError').textContent=e.message||'Ошибка регистрации';
-    $('regSubmit').disabled=false;
+// Показать экран блокировки с нужным username бота
+function _showBlocked(customMsg){
+  // Попробовать получить username бота с сервера
+  fetch(SERVER+'/api/botinfo').then(r=>r.json()).then(d=>{
+    const username=d.username||'';
+    if(username && $('botLink')){
+      $('botLink').href='https://t.me/'+username;
+    }
+  }).catch(()=>{});
+  if(customMsg && $('loadingMsg')){
+    setLoading(customMsg);
+    setTimeout(()=>showScreen('regScreen'), 1200);
+  } else {
+    showScreen('regScreen');
   }
 }
-
-// Позволить Enter на поле ника
-document.addEventListener('DOMContentLoaded',()=>{
-  const ni=$('regNickInput');
-  if(ni) ni.addEventListener('keydown',e=>{ if(e.key==='Enter') doRegister(); });
-});
 
 let _buttonsInited=false;
 function initButtons(){
