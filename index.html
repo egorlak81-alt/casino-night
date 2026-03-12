@@ -574,7 +574,6 @@ async function apiFetch(path, opts={}, timeoutMs=8000){
   const tid=setTimeout(()=>ctrl.abort(),timeoutMs);
   const isPost=opts.method&&opts.method!=='GET';
   try{
-    // opts последний чтоб не перезаписать signal; headers — только для POST
     const r=await fetch(SERVER+path, Object.assign(
       {signal:ctrl.signal},
       isPost?{headers:{'Content-Type':'application/json'}}:{},
@@ -582,24 +581,19 @@ async function apiFetch(path, opts={}, timeoutMs=8000){
     ));
     clearTimeout(tid);
     const text=await r.text();
-    let d;
-    try{ d=JSON.parse(text); }catch(e){ throw new Error('Bad JSON: '+text.slice(0,100)); }
+    let d; try{d=JSON.parse(text);}catch(e){throw new Error('Bad JSON: '+text.slice(0,80));}
     if(!r.ok) throw new Error((d&&d.error)||'HTTP '+r.status);
     return d;
-  }catch(e){
-    clearTimeout(tid);
-    throw e;
-  }
+  }catch(e){ clearTimeout(tid); throw e; }
 }
 
 // ── Получить профиль с сервера ──
 async function loadProfile(){
-  // Сервер всегда возвращает 200 + данные (автосоздаёт если нет)
-  // Бросает исключение только при сетевой ошибке
   const d=await apiFetch(`/api/me?tg_id=${myTgId}`);
-  console.log('[LP] ok:', JSON.stringify(d));
-  myNick = d.nickname || ('Player'+String(myTgId).slice(-5));
-  myBalance = d.balance ?? 1000;
+  console.log('[LP]', JSON.stringify(d));
+  if(d.nickname) myNick=d.nickname;
+  if(d.balance!=null) myBalance=d.balance;
+  bjBal=myBalance;
   updateNickUI(); updateBalanceUI();
 }
 
@@ -630,10 +624,11 @@ async function syncBalance(delta){
 let _lastRefresh=0;
 async function refreshBalance(){
   if(!myTgId) return;
-  const now=Date.now();if(now-_lastRefresh<10000)return;_lastRefresh=now;
+  const now=Date.now();if(now-_lastRefresh<15000)return;_lastRefresh=now;
   try{
     const d=await apiFetch(`/api/balance?tg_id=${myTgId}`);
-    myBalance=d.balance; myNick=d.nickname||myNick;
+    if(d.balance!=null){ myBalance=d.balance; bjBal=myBalance; }
+    if(d.nickname) myNick=d.nickname;
     updateBalanceUI(); updateNickUI();
   }catch(e){ console.warn('refreshBalance:',e.message); }
 }
@@ -652,17 +647,11 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   const _tg = window.Telegram?.WebApp;
   if(_tg){ try{_tg.ready();_tg.expand();}catch(e){} }
 
-  // 1: initData
-  try{
-    const raw=_tg?.initData||'';
-    if(raw){ const u=JSON.parse(new URLSearchParams(raw).get('user')||'null'); if(u&&u.id) myTgId=u.id; }
-  }catch(e){}
-  // 2: initDataUnsafe
-  if(!myTgId){ try{ const u=_tg?.initDataUnsafe?.user; if(u&&u.id) myTgId=u.id; }catch(e){} }
-  // 3: URL ?tg_id=
-  if(!myTgId){ try{ const v=parseInt(new URLSearchParams(location.search).get('tg_id')||''); if(v>0) myTgId=v; }catch(e){} }
-  // 4: hash #tg_id или просто #NUMBER
-  if(!myTgId){ try{ const h=location.hash.replace('#',''); const v=parseInt(h); if(v>0) myTgId=v; }catch(e){} }
+  // Получить tg_id — 4 способа
+  try{ const r=_tg?.initData||''; if(r){const u=JSON.parse(new URLSearchParams(r).get('user')||'null');if(u&&u.id)myTgId=u.id;} }catch(e){}
+  if(!myTgId){ try{const u=_tg?.initDataUnsafe?.user;if(u&&u.id)myTgId=u.id;}catch(e){} }
+  if(!myTgId){ try{const v=parseInt(new URLSearchParams(location.search).get('tg_id')||'');if(v>0)myTgId=v;}catch(e){} }
+  if(!myTgId){ try{const v=parseInt(location.hash.replace(/[^0-9]/g,''));if(v>0)myTgId=v;}catch(e){} }
 
   console.log('[INIT] tg_id='+myTgId);
 
@@ -671,36 +660,25 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     else{ _showBlocked(); return; }
   }
 
-  // ── Загружаем профиль ДО показа меню ──
-  setLoading('⏳ Загружаем информацию об игроке...');
-  let loaded=false;
+  // Загружаем профиль — показываем прогресс
   for(let i=0;i<4;i++){
+    setLoading(i===0?'⏳ Загружаем данные игрока...':'⏳ Загружаем данные игрока... ('+(i+1)+'/4)');
     try{
       await loadProfile();
-      loaded=true;
       break;
     }catch(e){
-      console.warn('[INIT] attempt '+(i+1)+' fail:',e.message);
-      if(i<3){
-        setLoading('⏳ Загружаем информацию об игроке... ('+(i+2)+'/4)');
-        await new Promise(r=>setTimeout(r,1500));
-      }
+      console.warn('[INIT] попытка '+(i+1)+' провалилась:',e.message);
+      if(i===3){ myNick='Player'+String(myTgId).slice(-5); myBalance=1000; }
+      else await new Promise(r=>setTimeout(r,1200));
     }
-  }
-  if(!loaded){
-    // Всё равно пускаем с авто-ником
-    myNick='Player'+String(myTgId).slice(-5);
-    myBalance=1000;
-    toast('⚠️ Нет связи — временный режим');
   }
 
   initButtons();
   showScreen('menu');
   updateNickUI(); updateBalanceUI();
   toast('💰 '+myNick+' · $'+myBalance);
-
   document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') refreshBalance(); });
-  setInterval(refreshBalance,60000);
+  setInterval(refreshBalance, 60000);
 });
 
 // Показать экран блокировки с нужным username бота
@@ -730,22 +708,35 @@ function initButtons(){
   $('btnLbBack').addEventListener('click',()=>{leaveRoom();showScreen('rooms');loadRooms();});
   $('wAgain').addEventListener('click',()=>{
     $('wov').classList.add('hidden');
-    // Сброс цвета оверлея
-    $('wov').style.background='rgba(0,0,0,.88)';
-    $('wT').style.color='var(--gold)';
     if(curGame==='blackjack') bjReset();
     else if(curGame==='dice') cfReset();
     else{ refreshBalance(); leaveRoom(); showScreen('rooms'); loadRooms(); }
   });
-  $('wMenu').addEventListener('click',()=>{
-    $('wov').classList.add('hidden');
-    $('wov').style.background='rgba(0,0,0,.88)';
-    $('wT').style.color='var(--gold)';
-    leaveRoom();refreshBalance();showScreen('menu');
-  });
+  $('wMenu').addEventListener('click',()=>{$('wov').classList.add('hidden');leaveRoom();refreshBalance();showScreen('menu');});
 
-  // ── СЕКРЕТНЫЙ КОД — обрабатывается через бот-команду /bonus ──
-  // Логика на стороне bot.py
+  // ── СЕКРЕТНЫЙ КОД ──
+  // Тапни по балансу в меню 7 раз → появится поле ввода
+  let _secretTaps=0,_secretTimer=null;
+  const _balEl=$('menuBal')||$('bjBal');
+  // Вешаем на лого казино в меню
+  const _logoEl=document.querySelector('.logo');
+  if(_logoEl){
+    _logoEl.addEventListener('click',()=>{
+      _secretTaps++;
+      clearTimeout(_secretTimer);
+      _secretTimer=setTimeout(()=>{_secretTaps=0;},2000);
+      if(_secretTaps>=7){
+        _secretTaps=0;
+        const code=prompt('🎰 Введи код:');
+        if(code==='casino777'){
+          syncBalance(1000);
+          toast('🎁 +$1000 получено!',3000);
+        } else if(code!==null){
+          toast('❌ Неверный код');
+        }
+      }
+    });
+  }
   $('c5').addEventListener('click',()=>bjBet(5));$('c10').addEventListener('click',()=>bjBet(10));
   $('c25').addEventListener('click',()=>bjBet(25));$('c50').addEventListener('click',()=>bjBet(50));
   $('c100').addEventListener('click',()=>bjBet(100));$('cX').addEventListener('click',()=>bjClear());
@@ -764,10 +755,7 @@ function initButtons(){
 function openGame(game){
   pName=myNick||'Игрок';
   curGame=game;
-  if(game==='blackjack'){
-    bjBal=myBalance>0?myBalance:1000;
-    bjInit(); showScreen('blackjack'); return;
-  }
+  if(game==='blackjack'){ bjBal=myBalance>0?myBalance:1000; bjInit(); showScreen('blackjack'); return; }
   if(game==='dice'){ cfInit(); showScreen('dice'); return; }
   $('roomsTitle').textContent=game==='poker'?'🃏 Покер':'🂮 Дурак';
   showScreen('rooms'); loadRooms();
@@ -900,7 +888,7 @@ function renderLbPlayers(){
 // ── BLACKJACK ──
 // ═══════════════════════════════
 // ══ BLACKJACK ══
-let bjD=[],bjP=[],bjDl=[],bjB=0,bjOn=false,bjNatural=false,bjDealerIv=null;
+let bjD=[],bjP=[],bjDl=[],bjB=0,bjBal=0,bjOn=false,bjNatural=false,bjDealerIv=null;
 
 function bjCV(c){if(['J','Q','K'].includes(c.r))return 10;if(c.r==='A')return 11;return parseInt(c.r);}
 function bjSc(h){let s=h.reduce((a,v)=>a+bjCV(v),0),ac=h.filter(v=>v.r==='A').length;while(s>21&&ac>0){s-=10;ac--;}return s;}
@@ -1035,23 +1023,10 @@ function bjEnd(res){
 
   setTimeout(()=>{
     const ps=bjSc(bjP), ds=bjSc(bjDl);
-    const netStr = net>0 ? '💚 +$'+net : net===0 ? '🤝 ±$0' : '🔴 -$'+Math.abs(net);
     showWinner(emoji, title,
-      netStr+' · Баланс: $'+myBalance,
-      'Ваши карты: '+ps+'  |  Дилер: '+(res==='bust'?ds:''+ds)
+      (net>0?'+$'+net:net===0?'±$0':'-$'+bjB)+' → Баланс: $'+myBalance,
+      'Ваши карты: '+ps+'  |  Дилер: '+ds
     );
-    // Красим заголовок и фон оверлея по результату
-    const wt=$('wT'), wov=$('wov');
-    if(net>0){
-      wt.style.color='#44ee77';
-      wov.style.background='rgba(0,40,0,.92)';
-    } else if(net===0){
-      wt.style.color='var(--gold)';
-      wov.style.background='rgba(0,0,0,.88)';
-    } else {
-      wt.style.color='#ff5555';
-      wov.style.background='rgba(40,0,0,.92)';
-    }
     $('wAgain').textContent='Играть снова';
   },300);
 
