@@ -594,25 +594,13 @@ async function apiFetch(path, opts={}, timeoutMs=8000){
 
 // ── Получить профиль с сервера ──
 async function loadProfile(){
-  if(!myTgId){ console.error('[LP] no tg_id'); return false; }
-  try{
-    const d=await apiFetch(`/api/me?tg_id=${myTgId}`);
-    console.log('[LP] raw response:', JSON.stringify(d));
-    // Сервер возвращает 404 если не найден (apiFetch бросит ошибку)
-    // Если дошли сюда — пользователь найден
-    if(!d || !d.nickname){
-      console.warn('[LP] no nickname in response, d='+JSON.stringify(d));
-      return false;
-    }
-    myNick = d.nickname;
-    myBalance = (d.balance!=null) ? d.balance : 0;
-    updateNickUI(); updateBalanceUI();
-    console.log('[LP] OK nick='+myNick+' bal='+myBalance);
-    return true;
-  }catch(e){
-    console.error('[LP] error:',e.message);
-    return false;
-  }
+  // Сервер всегда возвращает 200 + данные (автосоздаёт если нет)
+  // Бросает исключение только при сетевой ошибке
+  const d=await apiFetch(`/api/me?tg_id=${myTgId}`);
+  console.log('[LP] ok:', JSON.stringify(d));
+  myNick = d.nickname || ('Player'+String(myTgId).slice(-5));
+  myBalance = d.balance ?? 1000;
+  updateNickUI(); updateBalanceUI();
 }
 
 // ── Изменить баланс на сервере, вернуть новый ──
@@ -658,78 +646,53 @@ if('serviceWorker' in navigator){
 
 // DOMContentLoaded — не ждём шрифты/картинки/внешние скрипты
 document.addEventListener('DOMContentLoaded', async ()=>{
-  // Защита: если за 12 секунд ничего — показать кнопку перезагрузки
-  const _bail=setTimeout(()=>{
-    const lm=document.getElementById('loadingMsg');
-    if(lm) lm.innerHTML='⏱ Загрузка зависла<br><br>'
-      +'<button onclick="location.reload()" style="margin-top:10px;padding:12px 28px;'
-      +'background:#c8a84b;color:#1a0e00;border:none;border-radius:10px;font-size:15px;cursor:pointer">'
-      +'🔄 Нажми сюда</button>';
-  }, 12000);
+  showScreen('loading');
+  setLoading('Подключение...');
 
+  // ── Получить tg_id ──────────────────────────────
+  const _tg = window.Telegram?.WebApp;
+  if(_tg){ try{_tg.ready();_tg.expand();}catch(e){} }
+
+  // 1: initData
   try{
-    showScreen('loading');
-    setLoading('Подключение...');
+    const raw=_tg?.initData||'';
+    if(raw){ const u=JSON.parse(new URLSearchParams(raw).get('user')||'null'); if(u?.id) myTgId=u.id; }
+  }catch(e){}
+  // 2: initDataUnsafe
+  if(!myTgId){ const u=_tg?.initDataUnsafe?.user; if(u?.id) myTgId=u.id; }
+  // 3: URL ?tg_id=
+  if(!myTgId){ const v=parseInt(new URLSearchParams(location.search).get('tg_id')||'0'); if(v) myTgId=v; }
+  // 4: hash #NUMBER
+  if(!myTgId){ const v=parseInt(location.hash.replace('#','')||'0'); if(v) myTgId=v; }
 
-    // Получить tg_id
-    const _tg = window.Telegram?.WebApp;
-    if(_tg){ try{_tg.ready();_tg.expand();}catch(e){} }
+  console.log('[INIT] tg_id='+myTgId+' tg='+!!window.Telegram);
 
-    // 1: initData строка
-    try{
-      const raw=_tg?.initData||'';
-      if(raw){
-        const u=JSON.parse(new URLSearchParams(raw).get('user')||'null');
-        if(u?.id){ myTgId=u.id; console.log('[TG] initData:',myTgId); }
-      }
-    }catch(e){}
+  if(!myTgId){
+    if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){ myTgId=999999999; }
+    else{ _showBlocked(); return; }
+  }
 
-    // 2: initDataUnsafe
-    if(!myTgId){ const u=_tg?.initDataUnsafe?.user; if(u?.id){myTgId=u.id;console.log('[TG] unsafe:',myTgId);} }
-
-    // 3: URL ?tg_id=
-    if(!myTgId){ const v=parseInt(new URLSearchParams(location.search).get('tg_id')||'0'); if(v){myTgId=v;console.log('[TG] url:',myTgId);} }
-
-    // 4: hash #NUMBER
-    if(!myTgId){ const v=parseInt(location.hash.replace('#','')||'0'); if(v){myTgId=v;console.log('[TG] hash:',myTgId);} }
-
-    console.log('[TG] tg_id=',myTgId,'Telegram=',!!window.Telegram);
-
-    if(!myTgId){
-      if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){ myTgId=999999999; }
-      else{ clearTimeout(_bail); _showBlocked(''); return; }
-    }
-
-    // Загрузить профиль
-    setLoading('Загрузка...');
-    let exists=false;
-    try{ exists=await loadProfile(); }catch(e){
-      console.error('[INIT] loadProfile:',e);
-    }
-
-    clearTimeout(_bail);
-    if(!exists){
-      console.error('[INIT] exists=false, tg_id='+myTgId+', показываем regScreen');
-      _showBlocked(null);
-      return;
-    }
-
-    showScreen('menu');
-    updateNickUI(); updateBalanceUI();
-    toast('💰 '+myNick+' · $'+myBalance);
-    document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible')refreshBalance(); });
-    setInterval(refreshBalance,30000);
-    initButtons();
-
+  // ── Загрузить профиль (сервер автосоздаёт если нет) ──
+  setLoading('Загрузка...');
+  try{
+    await loadProfile();
   }catch(e){
-    clearTimeout(_bail);
-    console.error('[INIT] fatal:',e);
+    console.error('[INIT] loadProfile fail:',e.message);
+    // Показать кнопку retry вместо вечной загрузки
     const lm=document.getElementById('loadingMsg');
-    if(lm) lm.innerHTML='❌ '+e.message+'<br><br>'
+    if(lm) lm.innerHTML='⚠️ Нет связи с сервером<br><br>'
       +'<button onclick="location.reload()" style="margin-top:10px;padding:12px 28px;'
       +'background:#c8a84b;color:#1a0e00;border:none;border-radius:10px;font-size:15px;cursor:pointer">'
-      +'🔄 Перезагрузить</button>';
+      +'🔄 Повторить</button>';
+    return;
   }
+
+  showScreen('menu');
+  updateNickUI(); updateBalanceUI();
+  toast('💰 '+myNick+' · $'+myBalance);
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') refreshBalance(); });
+  setInterval(refreshBalance,30000);
+  initButtons();
 });
 
 // Показать экран блокировки с нужным username бота

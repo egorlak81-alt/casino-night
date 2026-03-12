@@ -205,18 +205,26 @@ def api_me():
     tg_id = request.args.get("tg_id", type=int)
     if not tg_id: return jsonify({"error": "no tg_id"}), 400
     row = get_player(tg_id)
-    log.info(f"[ME] tg_id={tg_id} → {'found nick='+repr(row[1]) if row else 'NOT FOUND'}")
+    # Нет записи — создать автоматически с авто-ником
     if not row:
-        # 404 — JS поймает как ошибку и покажет регистрацию
-        return jsonify({"error": "not_registered"}), 404
-    nick = row[1] if row[1] else f"Player{tg_id % 10000}"
-    if not row[1]:
-        try: qexec("UPDATE players SET nickname=%s WHERE tg_id=%s AND (nickname IS NULL OR nickname='')", (nick, tg_id))
+        auto_nick = f"Player{tg_id % 100000}"
+        try:
+            qexec("INSERT INTO players(tg_id,username,nickname,balance) VALUES(%s,%s,%s,1000) ON CONFLICT DO NOTHING",
+                  (tg_id, "", auto_nick))
+        except Exception as e:
+            log.error(f"[ME] auto-create error: {e}")
+        row = get_player(tg_id)
+    # Ник пустой — дать авто-ник
+    nick = (row[1] if row and row[1] else f"Player{tg_id % 100000}")
+    if row and not row[1]:
+        try: qexec("UPDATE players SET nickname=%s WHERE tg_id=%s", (nick, tg_id))
         except: pass
-    log.info(f"[ME] OK nick={nick} bal={row[2]}")
-    return jsonify({"tg_id": row[0], "nickname": nick,
-                    "balance": row[2], "total_won": row[3],
-                    "total_lost": row[4], "games_played": row[5]})
+    bal = row[2] if row else 1000
+    log.info(f"[ME] tg_id={tg_id} nick={nick} bal={bal}")
+    return jsonify({"tg_id": tg_id, "nickname": nick, "balance": bal,
+                    "total_won": row[3] if row else 0,
+                    "total_lost": row[4] if row else 0,
+                    "games_played": row[5] if row else 0})
 
 @app.route("/api/balance")
 def api_balance():
