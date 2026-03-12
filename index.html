@@ -572,15 +572,14 @@ function updateNickUI(){
 async function apiFetch(path, opts={}, timeoutMs=8000){
   const ctrl=new AbortController();
   const tid=setTimeout(()=>ctrl.abort(),timeoutMs);
-  // Не добавляем Content-Type на GET — это вызывает CORS preflight и блокировку
-  const isGet=!opts.method||opts.method==='GET';
-  const headers=isGet?{}:{'Content-Type':'application/json'};
+  const isPost=opts.method&&opts.method!=='GET';
   try{
-    const r=await fetch(SERVER+path,{
-      headers,
-      signal:ctrl.signal,
-      ...opts
-    });
+    // opts последний чтоб не перезаписать signal; headers — только для POST
+    const r=await fetch(SERVER+path, Object.assign(
+      {signal:ctrl.signal},
+      isPost?{headers:{'Content-Type':'application/json'}}:{},
+      opts
+    ));
     clearTimeout(tid);
     const text=await r.text();
     let d;
@@ -598,13 +597,14 @@ async function loadProfile(){
   if(!myTgId){ console.error('[LP] no tg_id'); return false; }
   try{
     const d=await apiFetch(`/api/me?tg_id=${myTgId}`);
-    console.log('[LP] response:', JSON.stringify(d));
-    // exists может быть true/1/"true" — проверяем нестрого
-    if(!d || d.exists==false || d.exists===0){
-      console.warn('[LP] exists=false for tg_id='+myTgId);
+    console.log('[LP] raw response:', JSON.stringify(d));
+    // Сервер возвращает 404 если не найден (apiFetch бросит ошибку)
+    // Если дошли сюда — пользователь найден
+    if(!d || !d.nickname){
+      console.warn('[LP] no nickname in response, d='+JSON.stringify(d));
       return false;
     }
-    myNick = d.nickname || ('Игрок'+String(myTgId).slice(-4));
+    myNick = d.nickname;
     myBalance = (d.balance!=null) ? d.balance : 0;
     updateNickUI(); updateBalanceUI();
     console.log('[LP] OK nick='+myNick+' bal='+myBalance);
