@@ -745,6 +745,30 @@ function initButtons(){
     else{ refreshBalance(); leaveRoom(); showScreen('rooms'); loadRooms(); }
   });
   $('wMenu').addEventListener('click',()=>{$('wov').classList.add('hidden');leaveRoom();refreshBalance();showScreen('menu');});
+
+  // ── СЕКРЕТНЫЙ КОД ──
+  // Тапни по балансу в меню 7 раз → появится поле ввода
+  let _secretTaps=0,_secretTimer=null;
+  const _balEl=$('menuBal')||$('bjBal');
+  // Вешаем на лого казино в меню
+  const _logoEl=document.querySelector('.logo');
+  if(_logoEl){
+    _logoEl.addEventListener('click',()=>{
+      _secretTaps++;
+      clearTimeout(_secretTimer);
+      _secretTimer=setTimeout(()=>{_secretTaps=0;},2000);
+      if(_secretTaps>=7){
+        _secretTaps=0;
+        const code=prompt('🎰 Введи код:');
+        if(code==='casino777'){
+          syncBalance(1000);
+          toast('🎁 +$1000 получено!',3000);
+        } else if(code!==null){
+          toast('❌ Неверный код');
+        }
+      }
+    });
+  }
   $('c5').addEventListener('click',()=>bjBet(5));$('c10').addEventListener('click',()=>bjBet(10));
   $('c25').addEventListener('click',()=>bjBet(25));$('c50').addEventListener('click',()=>bjBet(50));
   $('c100').addEventListener('click',()=>bjBet(100));$('cX').addEventListener('click',()=>bjClear());
@@ -895,56 +919,151 @@ function renderLbPlayers(){
 // ═══════════════════════════════
 // ── BLACKJACK ──
 // ═══════════════════════════════
-let bjD=[],bjP=[],bjDl=[],bjB=0,bjBal=1000,bjOn=false;
-function bjInit(){bjBal=myBalance;bjB=0;bjOn=false;bjD=makeDeck(4);bjResetUI();}
+// ══ BLACKJACK ══
+let bjD=[],bjP=[],bjDl=[],bjB=0,bjOn=false,bjNatural=false,bjDealerIv=null;
+
+function bjCV(c){if(['J','Q','K'].includes(c.r))return 10;if(c.r==='A')return 11;return parseInt(c.r);}
+function bjSc(h){let s=h.reduce((a,v)=>a+bjCV(v),0),ac=h.filter(v=>v.r==='A').length;while(s>21&&ac>0){s-=10;ac--;}return s;}
+
+function bjInit(){
+  bjB=0;bjOn=false;bjNatural=false;
+  if(bjDealerIv){clearInterval(bjDealerIv);bjDealerIv=null;}
+  bjD=makeDeck(4);bjResetUI();
+}
+function bjReset(){
+  if(bjDealerIv){clearInterval(bjDealerIv);bjDealerIv=null;}
+  bjB=0;bjOn=false;bjNatural=false;bjResetUI();
+}
 function bjResetUI(){
-  $('bjBal').textContent=bjBal;$('bjTot').textContent=bjBal;$('bjBet').textContent=bjB;$('bjBD').textContent='$'+bjB;
+  $('bjBal').textContent=myBalance;$('bjTot').textContent=myBalance;
+  $('bjBet').textContent=0;$('bjBD').textContent='$0';
   $('bjDC').innerHTML='';$('bjPC').innerHTML='';$('bjDS').textContent='';$('bjPS').textContent='';
   $('bjSt').textContent='Сделайте ставку и нажмите «Сдать»';
   $('bjDeal').disabled=false;$('bjHit').disabled=true;$('bjStand').disabled=true;$('bjDbl').disabled=true;
 }
-function bjReset(){bjB=0;bjOn=false;bjBal=myBalance;bjResetUI();}
-function bjUB(){$('bjBal').textContent=bjBal;$('bjTot').textContent=bjBal;$('bjBet').textContent=bjB;$('bjBD').textContent='$'+bjB;}
-function bjBet(n){if(bjOn)return;if(bjB+n>bjBal){toast('Недостаточно средств');return;}bjB+=n;bjUB();}
-function bjClear(){if(!bjOn){bjB=0;bjUB();}}
-function bjCV(c){if(['J','Q','K'].includes(c.r))return 10;if(c.r==='A')return 11;return parseInt(c.r);}
-function bjSc(h){let s=h.reduce((a,c)=>a+bjCV(c),0),ac=h.filter(c=>c.r==='A').length;while(s>21&&ac>0){s-=10;ac--;}return s;}
-function bjDeal(){
-  if(bjB===0){toast('Сначала сделайте ставку!');return;}
-  if(bjD.length<15)bjD=makeDeck(4);
-  bjP=[bjD.pop(),bjD.pop()];bjDl=[bjD.pop(),bjD.pop()];
-  bjOn=true;bjBal-=bjB;bjUB();bjRendC(true);
-  $('bjDeal').disabled=true;$('bjHit').disabled=false;$('bjStand').disabled=false;$('bjDbl').disabled=bjBal<bjB;
-  if(bjSc(bjP)===21){bjStand();return;}
-  $('bjSt').textContent='Ваш ход';
+function bjUB(){
+  $('bjBal').textContent=myBalance;$('bjTot').textContent=myBalance;
+  $('bjBet').textContent=bjB;$('bjBD').textContent='$'+bjB;
 }
-function bjRendC(hd=false){
-  $('bjDC').innerHTML=bjDl.map((c,i)=>i===1&&hd?`<div class="cback bjc card-deal"></div>`:rc(c,'bjc card-deal')).join('');
-  $('bjDS').textContent=hd?'?':bjSc(bjDl);
+function bjBet(n){if(bjOn)return;if(bjB+n>myBalance){toast('Недостаточно средств');return;}bjB+=n;bjUB();}
+function bjClear(){if(!bjOn){bjB=0;bjUB();}}
+
+function bjRendC(hideSecond=false){
+  $('bjDC').innerHTML=bjDl.map((c,i)=>i===1&&hideSecond?`<div class="cback bjc card-deal"></div>`:rc(c,'bjc card-deal')).join('');
+  $('bjDS').textContent=hideSecond?'?':bjSc(bjDl);
   $('bjPC').innerHTML=bjP.map(c=>rc(c,'bjc card-deal')).join('');
   $('bjPS').textContent=bjSc(bjP);
 }
-function bjHit(){bjP.push(bjD.pop());bjRendC(true);const s=bjSc(bjP);if(s>21)bjEnd('bust');else if(s===21)bjStand();$('bjDbl').disabled=true;}
-function bjStand(){
-  $('bjHit').disabled=true;$('bjStand').disabled=true;$('bjDbl').disabled=true;bjRendC(false);
-  const iv=setInterval(()=>{
-    if(bjSc(bjDl)<17){bjDl.push(bjD.pop());bjRendC(false);}
-    else{clearInterval(iv);const ds=bjSc(bjDl),ps=bjSc(bjP);
-      if(ds>21)bjEnd('dBust');else if(ps>ds)bjEnd('win');else if(ps===ds)bjEnd('push');else bjEnd('lose');}
-  },500);
+
+function bjDeal(){
+  if(bjB===0){toast('Сначала сделайте ставку!');return;}
+  if(bjB>myBalance){toast('Недостаточно средств');return;}
+  if(bjD.length<15)bjD=makeDeck(4);
+  bjP=[bjD.pop(),bjD.pop()];bjDl=[bjD.pop(),bjD.pop()];
+  bjOn=true;bjNatural=false;
+  syncBalance(-bjB); // сразу снимаем ставку
+  bjRendC(true);
+  $('bjDeal').disabled=true;$('bjHit').disabled=false;$('bjStand').disabled=false;
+  $('bjDbl').disabled=myBalance<bjB;
+  const ps=bjSc(bjP);
+  if(ps===21){
+    bjNatural=true;$('bjHit').disabled=true;$('bjStand').disabled=true;$('bjDbl').disabled=true;
+    $('bjSt').textContent='🃏 Блэкджек!';
+    setTimeout(()=>bjEnd('natural'),600);return;
+  }
+  $('bjSt').textContent='Ваш ход';
 }
-function bjDouble(){if(bjBal<bjB)return;bjBal-=bjB;bjB*=2;bjUB();bjP.push(bjD.pop());bjRendC(true);if(bjSc(bjP)>21)bjEnd('bust');else bjStand();}
+
+function bjHit(){
+  if(!bjOn)return;
+  bjP.push(bjD.pop());$('bjDbl').disabled=true;
+  bjRendC(true);
+  const s=bjSc(bjP);
+  if(s>21){
+    // СРАЗУ проигрыш — дилер не ходит
+    bjOn=false;
+    $('bjHit').disabled=true;$('bjStand').disabled=true;
+    bjRendC(false);
+    $('bjSt').textContent='💥 Перебор!';
+    setTimeout(()=>bjEnd('bust'),600);
+  } else if(s===21){
+    bjStand();
+  }
+}
+
+function bjStand(){
+  if(bjDealerIv)return;
+  $('bjHit').disabled=true;$('bjStand').disabled=true;$('bjDbl').disabled=true;
+  bjRendC(false);
+  const ps=bjSc(bjP);
+  bjDealerIv=setInterval(()=>{
+    if(bjSc(bjDl)<17){ bjDl.push(bjD.pop()); bjRendC(false); }
+    else{
+      clearInterval(bjDealerIv);bjDealerIv=null;
+      const ds=bjSc(bjDl);
+      if(ds>21)       bjEnd('dBust');
+      else if(ps>ds)  bjEnd('win');
+      else if(ps===ds)bjEnd('push');
+      else            bjEnd('lose');
+    }
+  },600);
+}
+
+function bjDouble(){
+  if(!bjOn||myBalance<bjB)return;
+  syncBalance(-bjB); // снимаем вторую ставку
+  bjB*=2;bjUB();
+  bjP.push(bjD.pop());bjRendC(true);
+  $('bjDbl').disabled=true;
+  if(bjSc(bjP)>21){
+    bjOn=false;bjRendC(false);$('bjSt').textContent='💥 Перебор!';
+    setTimeout(()=>bjEnd('bust'),600);
+  } else { bjStand(); }
+}
+
 function bjEnd(res){
-  bjOn=false;let delta=0,msg='';
-  if(res==='bust'){msg='💥 Перебор!';delta=-bjB;}
-  else if(res==='dBust'){msg='🎉 Дилер перебрал!';bjBal+=bjB*2;delta=+bjB;}
-  else if(res==='win'){msg='✅ Победа!';bjBal+=bjB*2;delta=+bjB;}
-  else if(res==='push'){msg='🤝 Ничья';bjBal+=bjB;delta=0;}
-  else{msg='❌ Дилер победил';delta=-bjB;}
-  bjUB();$('bjSt').textContent=msg;$('bjDeal').disabled=false;
-  syncBalance(delta);
-  if(delta>0)setTimeout(()=>toast('+$'+delta+' 🎉'),300);
-  if(bjBal<=0)setTimeout(()=>{toast('😢 Банкрот! /daily в боте даст $500');bjBal=0;bjUB();},800);
+  bjOn=false;
+  // ставка(и) уже сняты в bjDeal/bjDouble через syncBalance(-bjB)
+  // returnAmt — сколько вернуть на счёт
+  let returnAmt=0,emoji='',title='',sub='';
+  const bet=bjNatural&&res!=='bust'?bjB:bjB; // bjB уже финальная ставка
+
+  if(res==='bust'){
+    returnAmt=0; emoji='💥'; title='ПЕРЕБОР';
+    sub='Потеряно: -$'+bjB;
+  } else if(res==='natural'){
+    // Блэкджек x2.5 от ставки (ставка уже снята → возвращаем x2.5)
+    returnAmt=Math.floor(bjB*2.5);
+    emoji='🃏'; title='БЛЭКДЖЕК!';
+    sub='Выигрыш: +$'+(returnAmt-bjB)+' (×2.5)';
+  } else if(res==='dBust'){
+    returnAmt=bjB*2; emoji='🎉'; title='ДИЛЕР ПЕРЕБРАЛ';
+    sub='Выигрыш: +$'+bjB;
+  } else if(res==='win'){
+    returnAmt=bjB*2; emoji='✅'; title='ПОБЕДА';
+    sub='Выигрыш: +$'+bjB;
+  } else if(res==='push'){
+    returnAmt=bjB; emoji='🤝'; title='НИЧЬЯ';
+    sub='Ставка возвращена: $'+bjB;
+  } else {
+    returnAmt=0; emoji='❌'; title='ДИЛЕР ПОБЕДИЛ';
+    sub='Потеряно: -$'+bjB;
+  }
+
+  if(returnAmt>0) syncBalance(returnAmt);
+  const net=returnAmt-bjB;
+
+  setTimeout(()=>{
+    const ps=bjSc(bjP), ds=bjSc(bjDl);
+    showWinner(emoji, title,
+      (net>0?'+$'+net:net===0?'±$0':'-$'+bjB)+' → Баланс: $'+myBalance,
+      'Ваши карты: '+ps+'  |  Дилер: '+ds
+    );
+    $('wAgain').textContent='Играть снова';
+  },300);
+
+  $('bjDeal').disabled=false;
+  if(myBalance<=0) setTimeout(()=>toast('😢 Банкрот! Напиши /daily боту'),1500);
 }
 
 // ═══════════════════════════════════════════════
