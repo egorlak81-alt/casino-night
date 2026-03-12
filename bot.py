@@ -128,16 +128,28 @@ app = Flask(__name__)
 CORS(app)
 
 tg_app = None
+tg_loop = None  # shared asyncio loop для бота
 
 @app.route("/health")
 def health(): return "ok", 200
 
 @app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
-async def webhook():
-    if tg_app is None: return "not ready", 503
+def webhook():
+    """Синхронный route — пробрасываем update в asyncio loop бота."""
+    if tg_app is None or tg_loop is None:
+        return "not ready", 503
     data = request.get_json(force=True)
-    update = Update.de_json(data, tg_app.bot)
-    await tg_app.process_update(update)
+    if not data:
+        return "bad request", 400
+    import asyncio
+    async def _process():
+        update = Update.de_json(data, tg_app.bot)
+        await tg_app.process_update(update)
+    future = asyncio.run_coroutine_threadsafe(_process(), tg_loop)
+    try:
+        future.result(timeout=25)
+    except Exception as e:
+        log.error(f"Webhook process error: {e}")
     return "ok", 200
 
 @app.route("/api/rooms")
@@ -318,7 +330,7 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── STARTUP ──
 def setup():
-    global tg_app
+    global tg_app, tg_loop
     import asyncio, requests as req
 
     if not BOT_TOKEN or not DATABASE_URL:
@@ -340,6 +352,7 @@ def setup():
         log.info(f"Webhook set: {webhook_url}")
 
     loop = asyncio.new_event_loop()
+    tg_loop = loop   # expose to webhook handler
     threading.Thread(target=loop.run_forever, daemon=True).start()
     asyncio.run_coroutine_threadsafe(init_tg(), loop)
     log.info("Bot setup done (webhook mode)")
