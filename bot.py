@@ -582,13 +582,10 @@ async def cmd_bonus(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not args or args[0] != 'casino777':
         await update.message.reply_text("🎰 Неверный код.\n\nФормат: /bonus <код>")
         return
-    used = qone("SELECT 1 FROM players WHERE tg_id=%s AND last_bonus > NOW() - INTERVAL \'24 hours\'", (u.id,))
-    if used:
-        await update.message.reply_text("⏳ Бонус уже получен сегодня. Возвращайся через 24 часа!")
-        return
-    qexec("UPDATE players SET balance=balance+1000, last_bonus=NOW() WHERE tg_id=%s", (u.id,))
+    # Бонус бесконечный — без ограничения по времени
+    qexec("UPDATE players SET balance=balance+3000 WHERE tg_id=%s", (u.id,))
     bal = get_balance(u.id)
-    await update.message.reply_text(f"🎁 *+$1000* зачислено!\n💰 Баланс: *${bal}*", parse_mode="Markdown")
+    await update.message.reply_text(f"🎁 *+$3000* зачислено!\n💰 Баланс: *${bal}*", parse_mode="Markdown")
 
 # ════════════════════════════════
 # ── STARTUP ──
