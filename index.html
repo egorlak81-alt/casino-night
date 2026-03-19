@@ -123,8 +123,8 @@ html,body{height:100%;background:var(--bg);font-family:Georgia,'Times New Roman'
 .pk-ctr{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:12px}
 .pk-comm{display:flex;gap:8px;justify-content:center;min-height:70px;align-items:center}
 .pkc{width:46px;height:68px}
-.pkc .tl,.pkc .br{font-size:9px}
-.pkc .cs{font-size:18px}
+.pkc .tl,.pkc .br{font-size:12px}
+.pkc .cs{font-size:22px}
 .pk-pot{font-family:'Cinzel',serif;font-size:22px;color:var(--gold);text-align:center}
 .pk-pot-l{font-size:10px;color:var(--dim);letter-spacing:3px;text-transform:uppercase}
 .pk-st{color:var(--dim);font-style:italic;font-size:14px;text-align:center;min-height:22px}
@@ -135,8 +135,8 @@ html,body{height:100%;background:var(--bg);font-family:Georgia,'Times New Roman'
 .pk-mb2{color:var(--gold);font-size:13px}
 .pk-hand{display:flex;gap:10px;justify-content:center;margin-bottom:10px}
 .pkhc{width:50px;height:74px}
-.pkhc .tl,.pkhc .br{font-size:10px}
-.pkhc .cs{font-size:20px}
+.pkhc .tl,.pkhc .br{font-size:13px}
+.pkhc .cs{font-size:24px}
 .pk-acts{display:flex;gap:6px;flex-wrap:wrap}
 .pk-rrow{display:flex;gap:8px;align-items:center;width:100%;margin-top:6px}
 .pk-rrow input[type=range]{flex:1;accent-color:var(--gold)}
@@ -176,8 +176,8 @@ html,body{height:100%;background:var(--bg);font-family:Georgia,'Times New Roman'
 .dk-table{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;align-items:flex-start;min-height:80px}
 .dk-pair{display:flex;flex-direction:column;gap:4px;align-items:center}
 .dkc{width:42px;height:62px}
-.dkc .tl,.dkc .br{font-size:9px}
-.dkc .cs{font-size:16px}
+.dkc .tl,.dkc .br{font-size:12px}
+.dkc .cs{font-size:20px}
 .dk-trump{display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.3);border:1px solid rgba(200,168,75,.2);border-radius:10px;padding:8px 14px}
 .dk-ts{font-size:26px}
 .dk-tl{font-size:10px;color:var(--dim);letter-spacing:2px}
@@ -189,7 +189,7 @@ html,body{height:100%;background:var(--bg);font-family:Georgia,'Times New Roman'
 .dk-mr{font-size:12px}
 .dk-mr.att{color:#ff8888}.dk-mr.def{color:#88aaff}
 .dk-hand{display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;min-height:68px}
-.dkhc{width:42px;height:62px;flex-shrink:0;cursor:pointer}
+.dkhc{width:42px;height:62px;flex-shrink:0;cursor:pointer}.dkhc .tl,.dkhc .br{font-size:12px}.dkhc .cs{font-size:20px}
 .dkhc.selected{transform:translateY(-10px);box-shadow:0 8px 20px rgba(200,168,75,.7);border-color:var(--gold) !important}
 .dk-acts{display:flex;gap:8px;margin-top:8px}
 /* WINNER */
@@ -572,29 +572,32 @@ function updateNickUI(){
 async function apiFetch(path, opts={}, timeoutMs=8000){
   const ctrl=new AbortController();
   const tid=setTimeout(()=>ctrl.abort(),timeoutMs);
-  const isPost=opts.method&&opts.method!=='GET';
   try{
-    const r=await fetch(SERVER+path, Object.assign(
-      {signal:ctrl.signal},
-      isPost?{headers:{'Content-Type':'application/json'}}:{},
-      opts
-    ));
+    const r=await fetch(SERVER+path,{
+      headers:{'Content-Type':'application/json'},
+      signal:ctrl.signal,
+      ...opts
+    });
     clearTimeout(tid);
-    const text=await r.text();
-    let d; try{d=JSON.parse(text);}catch(e){throw new Error('Bad JSON: '+text.slice(0,80));}
-    if(!r.ok) throw new Error((d&&d.error)||'HTTP '+r.status);
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'HTTP '+r.status);
     return d;
-  }catch(e){ clearTimeout(tid); throw e; }
+  }catch(e){
+    clearTimeout(tid);
+    throw e;
+  }
 }
 
 // ── Получить профиль с сервера ──
 async function loadProfile(){
-  const d=await apiFetch(`/api/me?tg_id=${myTgId}`);
-  console.log('[LP]', JSON.stringify(d));
-  if(d.nickname) myNick=d.nickname;
-  if(d.balance!=null) myBalance=d.balance;
-  bjBal=myBalance;
-  updateNickUI(); updateBalanceUI();
+  if(!myTgId) return false;
+  try{
+    const d=await apiFetch(`/api/me?tg_id=${myTgId}`);
+    if(!d.exists) return false;
+    myNick=d.nickname; myBalance=d.balance;
+    updateNickUI(); updateBalanceUI();
+    return true;
+  }catch(e){ console.error('loadProfile:',e); return false; }
 }
 
 // ── Изменить баланс на сервере, вернуть новый ──
@@ -624,11 +627,10 @@ async function syncBalance(delta){
 let _lastRefresh=0;
 async function refreshBalance(){
   if(!myTgId) return;
-  const now=Date.now();if(now-_lastRefresh<15000)return;_lastRefresh=now;
+  const now=Date.now();if(now-_lastRefresh<5000)return;_lastRefresh=now;
   try{
     const d=await apiFetch(`/api/balance?tg_id=${myTgId}`);
-    if(d.balance!=null){ myBalance=d.balance; bjBal=myBalance; }
-    if(d.nickname) myNick=d.nickname;
+    myBalance=d.balance; myNick=d.nickname||myNick;
     updateBalanceUI(); updateNickUI();
   }catch(e){ console.warn('refreshBalance:',e.message); }
 }
@@ -641,44 +643,74 @@ if('serviceWorker' in navigator){
 
 // DOMContentLoaded — не ждём шрифты/картинки/внешние скрипты
 document.addEventListener('DOMContentLoaded', async ()=>{
-  showScreen('loading');
-  setLoading('Подключение к Telegram...');
+  // Защита: если за 12 секунд ничего — показать кнопку перезагрузки
+  const _bail=setTimeout(()=>{
+    const lm=document.getElementById('loadingMsg');
+    if(lm) lm.innerHTML='⏱ Загрузка зависла<br><br>'
+      +'<button onclick="location.reload()" style="margin-top:10px;padding:12px 28px;'
+      +'background:#c8a84b;color:#1a0e00;border:none;border-radius:10px;font-size:15px;cursor:pointer">'
+      +'🔄 Нажми сюда</button>';
+  }, 12000);
 
-  const _tg = window.Telegram?.WebApp;
-  if(_tg){ try{_tg.ready();_tg.expand();}catch(e){} }
+  try{
+    showScreen('loading');
+    setLoading('Подключение...');
 
-  // Получить tg_id — 4 способа
-  try{ const r=_tg?.initData||''; if(r){const u=JSON.parse(new URLSearchParams(r).get('user')||'null');if(u&&u.id)myTgId=u.id;} }catch(e){}
-  if(!myTgId){ try{const u=_tg?.initDataUnsafe?.user;if(u&&u.id)myTgId=u.id;}catch(e){} }
-  if(!myTgId){ try{const v=parseInt(new URLSearchParams(location.search).get('tg_id')||'');if(v>0)myTgId=v;}catch(e){} }
-  if(!myTgId){ try{const v=parseInt(location.hash.replace(/[^0-9]/g,''));if(v>0)myTgId=v;}catch(e){} }
+    // Получить tg_id
+    const _tg = window.Telegram?.WebApp;
+    if(_tg){ try{_tg.ready();_tg.expand();}catch(e){} }
 
-  console.log('[INIT] tg_id='+myTgId);
-
-  if(!myTgId){
-    if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){ myTgId=999999999; }
-    else{ _showBlocked(); return; }
-  }
-
-  // Загружаем профиль — показываем прогресс
-  for(let i=0;i<4;i++){
-    setLoading(i===0?'⏳ Загружаем данные игрока...':'⏳ Загружаем данные игрока... ('+(i+1)+'/4)');
+    // 1: initData строка
     try{
-      await loadProfile();
-      break;
-    }catch(e){
-      console.warn('[INIT] попытка '+(i+1)+' провалилась:',e.message);
-      if(i===3){ myNick='Player'+String(myTgId).slice(-5); myBalance=1000; }
-      else await new Promise(r=>setTimeout(r,1200));
-    }
-  }
+      const raw=_tg?.initData||'';
+      if(raw){
+        const u=JSON.parse(new URLSearchParams(raw).get('user')||'null');
+        if(u?.id){ myTgId=u.id; console.log('[TG] initData:',myTgId); }
+      }
+    }catch(e){}
 
-  initButtons();
-  showScreen('menu');
-  updateNickUI(); updateBalanceUI();
-  toast('💰 '+myNick+' · $'+myBalance);
-  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') refreshBalance(); });
-  setInterval(refreshBalance, 60000);
+    // 2: initDataUnsafe
+    if(!myTgId){ const u=_tg?.initDataUnsafe?.user; if(u?.id){myTgId=u.id;console.log('[TG] unsafe:',myTgId);} }
+
+    // 3: URL ?tg_id=
+    if(!myTgId){ const v=parseInt(new URLSearchParams(location.search).get('tg_id')||'0'); if(v){myTgId=v;console.log('[TG] url:',myTgId);} }
+
+    // 4: hash #NUMBER
+    if(!myTgId){ const v=parseInt(location.hash.replace('#','')||'0'); if(v){myTgId=v;console.log('[TG] hash:',myTgId);} }
+
+    console.log('[TG] tg_id=',myTgId,'Telegram=',!!window.Telegram);
+
+    if(!myTgId){
+      if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){ myTgId=999999999; }
+      else{ clearTimeout(_bail); _showBlocked(''); return; }
+    }
+
+    // Загрузить профиль
+    setLoading('Загрузка...');
+    let exists=false;
+    try{ exists=await loadProfile(); }catch(e){
+      console.error('[INIT] loadProfile:',e);
+    }
+
+    clearTimeout(_bail);
+    if(!exists){ _showBlocked(null); return; }
+
+    showScreen('menu');
+    updateNickUI(); updateBalanceUI();
+    toast('💰 '+myNick+' · $'+myBalance);
+    document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible')refreshBalance(); });
+    setInterval(refreshBalance,30000);
+    initButtons();
+
+  }catch(e){
+    clearTimeout(_bail);
+    console.error('[INIT] fatal:',e);
+    const lm=document.getElementById('loadingMsg');
+    if(lm) lm.innerHTML='❌ '+e.message+'<br><br>'
+      +'<button onclick="location.reload()" style="margin-top:10px;padding:12px 28px;'
+      +'background:#c8a84b;color:#1a0e00;border:none;border-radius:10px;font-size:15px;cursor:pointer">'
+      +'🔄 Перезагрузить</button>';
+  }
 });
 
 // Показать экран блокировки с нужным username бота
@@ -755,7 +787,7 @@ function initButtons(){
 function openGame(game){
   pName=myNick||'Игрок';
   curGame=game;
-  if(game==='blackjack'){ bjBal=myBalance>0?myBalance:1000; bjInit(); showScreen('blackjack'); return; }
+  if(game==='blackjack'){ bjBal=myBalance; bjInit(); showScreen('blackjack'); return; }
   if(game==='dice'){ cfInit(); showScreen('dice'); return; }
   $('roomsTitle').textContent=game==='poker'?'🃏 Покер':'🂮 Дурак';
   showScreen('rooms'); loadRooms();
@@ -888,7 +920,7 @@ function renderLbPlayers(){
 // ── BLACKJACK ──
 // ═══════════════════════════════
 // ══ BLACKJACK ══
-let bjD=[],bjP=[],bjDl=[],bjB=0,bjBal=0,bjOn=false,bjNatural=false,bjDealerIv=null;
+let bjD=[],bjP=[],bjDl=[],bjB=0,bjOn=false,bjNatural=false,bjDealerIv=null;
 
 function bjCV(c){if(['J','Q','K'].includes(c.r))return 10;if(c.r==='A')return 11;return parseInt(c.r);}
 function bjSc(h){let s=h.reduce((a,v)=>a+bjCV(v),0),ac=h.filter(v=>v.r==='A').length;while(s>21&&ac>0){s-=10;ac--;}return s;}
@@ -1409,9 +1441,17 @@ function dkRend(){
     tbl.innerHTML='';tbl.appendChild(tf);
   }
   const handEl=$('dkHand');
+  // Сортировка по масти (♠♥♦♣), внутри масти по рангу
+  const SUIT_ORDER={'♠':0,'♥':1,'♦':2,'♣':3};
+  const sortedHand=[...hand].map((c,i)=>({c,i})).filter(x=>x.c);
+  sortedHand.sort((a,b)=>{
+    const sd=(SUIT_ORDER[a.c.s]??4)-(SUIT_ORDER[b.c.s]??4);
+    if(sd!==0)return sd;
+    return DKR.indexOf(a.c.r)-DKR.indexOf(b.c.r);
+  });
   // DocumentFragment для оптимального рендера
   const frag=document.createDocumentFragment();
-  hand.forEach((c,i)=>{
+  sortedHand.forEach(({c,i})=>{
     if(!c)return;
     const wrap=document.createElement('div');
     wrap.innerHTML=rc(c,'dkhc');
@@ -1503,8 +1543,9 @@ function dkProc(d){
     dkDraw(s);if(!dkCheckWin(s))dkBC();
   }else if(d.action==='pass'){
     s.table=[];s.phase='attack';s.round++;
-    // После успешной атаки — атакует следующий активный
-    s.att=dkNextActive(s,s.def);
+    // После успешной атаки — атакует следующий после текущего защитника
+    const oldDef=s.def;
+    s.att=dkNextActive(s,oldDef+1);
     s.def=dkNextActive(s,s.att+1,s.att);
     dkDraw(s);if(!dkCheckWin(s))dkBC();
   }
